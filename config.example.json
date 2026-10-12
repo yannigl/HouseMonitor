@@ -1,0 +1,12 @@
+{
+  "ha_url": "http://homeassistant.local:8123",
+  "ha_token": "LONG_LIVED_ACCESS_TOKEN",
+  "telegram_token": "123456:ABC...",
+  "telegram_chat_id": "123456789",
+  "hours": 24,
+  "entities": [
+    {"id": "sensor.salon_temperature", "name": "Salon", "unit": "°C"},
+    {"id": "sensor.exterieur_temperature", "name": "Extérieur", "unit": "°C"},
+    {"id": "sensor.salon_humidity", "name": "Humidité salon", "unit": "%"}
+  ]
+}
