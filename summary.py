@@ -8,6 +8,7 @@ Découvre toutes les entités via /api/states, puis résume selon le type :
   input_boolean     -> nombre de cycles (on -> off) + heures de départ
 """
 import json
+import os
 import sys
 import urllib.parse
 import urllib.request
@@ -22,12 +23,19 @@ HOURS = CFG.get("hours", 24)
 DOMAINS = CFG.get("domains", ["sensor", "binary_sensor", "switch", "light", "input_boolean"])
 EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
+NETLOG = Path(__file__).parent / "netlog.csv"
+TLS_OVERHEAD = 6000  # ~octets de handshake TLS par connexion (estimation)
+NET = {"sent": 0, "recv": 0}  # octets internet (Telegram seulement, HA est en local)
 
 
 def http(url, headers=None, data=None):
     req = urllib.request.Request(url, headers=headers or {}, data=data)
     with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)
+        raw = r.read()
+        if not url.startswith(HA):  # trafic internet : on compte
+            NET["sent"] += len(data or b"") + len(str(req.header_items())) + 200
+            NET["recv"] += len(raw) + len(str(r.headers))
+        return json.loads(raw)
 
 
 def ts(state):
@@ -128,6 +136,7 @@ def build():
 def send(text):
     # Telegram limite à 4096 caractères par message
     for i in range(0, len(text), 4000):
+        NET["sent"] += TLS_OVERHEAD
         http(
             f"https://api.telegram.org/bot{CFG['telegram_token']}/sendMessage",
             data=urllib.parse.urlencode(
@@ -136,9 +145,32 @@ def send(text):
         )
 
 
+def log_net():
+    """Journal de la consommation internet : date, octets git pull, octets Telegram."""
+    git_bytes = int(os.environ.get("GIT_BYTES", 0))  # fourni par run.sh
+    tg_bytes = NET["sent"] + NET["recv"]
+    new = not NETLOG.exists()
+    with NETLOG.open("a") as f:
+        if new:
+            f.write("date,git_pull_octets,telegram_octets,total_octets\n")
+        f.write(f"{datetime.now():%Y-%m-%d %H:%M},{git_bytes},{tg_bytes},{git_bytes + tg_bytes}\n")
+    return git_bytes, tg_bytes
+
+
+def net_line():
+    """Conso cumulée du mois courant d'après netlog.csv."""
+    if not NETLOG.exists():
+        return ""
+    month = f"{datetime.now():%Y-%m}"
+    total = sum(int(l.split(",")[3]) for l in NETLOG.read_text().splitlines()[1:]
+                if l.startswith(month))
+    return f"\n\n📡 Data 4G du script ce mois : {total / 1024:.0f} Ko"
+
+
 if __name__ == "__main__":
-    msg = build()
+    msg = build() + net_line()
     if "--dry" in sys.argv:
         print(msg)
     else:
         send(msg)
+        log_net()

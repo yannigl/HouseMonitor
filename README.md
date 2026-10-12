@@ -24,5 +24,24 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 3. `cp config.example.json config.json` et remplir les jetons.
    - `domains` : types d'entités inclus.
    - `exclude` : préfixes d'`entity_id` à ignorer (ex. `sensor.sun_`).
-4. Tester : `python3 summary.py --dry` (affiche sans envoyer), puis `python3 summary.py`.
-5. Cron (`crontab -e`) pour 7h30 : `30 7 * * * /usr/bin/python3 /home/pi/HouseMonitor/summary.py`
+4. Tester : `python3 summary.py --dry` (affiche sans envoyer), puis `./run.sh`.
+5. Cron (`crontab -e`) pour 7h30 : `30 7 * * * /home/pi/HouseMonitor/run.sh`
+
+`run.sh` fait d'abord un `git pull` (mise à jour automatique du script, 1×/jour), puis lance `summary.py`.
+
+## Consommation data (4G)
+Les appels à Home Assistant restent sur `127.0.0.1` : **zéro** trafic internet.
+Seuls le `git pull` et l'envoi Telegram sortent sur la 4G. Chaque exécution ajoute une ligne à `netlog.csv` :
+
+```
+date,git_pull_octets,telegram_octets,total_octets
+2026-10-12 07:30,2140,8930,11070
+```
+
+- `telegram_octets` : taille réelle requête + réponse, plus ~6 Ko estimés de handshake TLS.
+- `git_pull_octets` : delta de `/proc/net/dev` sur l'interface par défaut pendant le pull
+  (approximatif : inclut ce que HA envoie pendant ces quelques secondes).
+  Forcer l'interface avec `IFACE=wwan0 ./run.sh` si besoin.
+
+Le message Telegram se termine par le cumul du mois (`📡 Data 4G du script ce mois : 310 Ko`).
+Ordre de grandeur attendu : ~10 à 15 Ko par jour, soit < 0,5 Mo par mois.
