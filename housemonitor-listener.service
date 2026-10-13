@@ -1,0 +1,15 @@
+[Unit]
+Description=HouseMonitor Telegram listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/HouseMonitor
+ExecStart=/usr/bin/python3 /home/pi/HouseMonitor/listener.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

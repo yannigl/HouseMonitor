@@ -29,6 +29,42 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 
 `run.sh` fait d'abord un `git pull` (mise à jour automatique du script, 1×/jour), puis lance `summary.py`.
 
+## Commandes Telegram (listener)
+`listener.py` tourne en permanence (service systemd) et écoute vos commandes sur le même bot :
+
+| Commande | Effet |
+|---|---|
+| `/status` | État des 3 services + data 4G du mois |
+| `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
+| `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
+| `/stop listener` / `/start listener` | Mode éco (1 appel toutes les `slow_poll_hours` h) / mode réactif |
+
+Chaque réponse se termine par le statut des trois services. L'état est dans `state.json`.
+Seuls les messages venant de votre `telegram_chat_id` sont pris en compte.
+
+Installation du service :
+```bash
+sudo cp housemonitor-listener.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now housemonitor-listener
+systemctl status housemonitor-listener      # doit être "active (running)"
+journalctl -u housemonitor-listener -f       # logs en direct
+```
+(Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
+Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
+
+### Coût data du listener
+Pas de webhook possible derrière la 4G : le Pi interroge Telegram (`getUpdates`) en **long polling sur
+une connexion persistante**. Le handshake TLS (~6 Ko) n'est payé qu'à la connexion, ensuite chaque appel
+vide coûte ~0,6 Ko. Réglable via `poll_timeout` (secondes) dans `config.json` :
+
+| `poll_timeout` | appels / jour | data / mois | réactivité |
+|---|---|---|---|
+| 60 | 1 440 | ~26 Mo | immédiate |
+| 300 (défaut) | 288 | ~5 Mo | immédiate |
+| 600 | 144 | ~2,6 Mo | immédiate, mais le NAT 4G peut couper (= reconnexion, 6 Ko) |
+| `/stop listener` | 6 | ~1 Mo | jusqu'à 4 h |
+
 ## Surveillance : être alerté si le script ne tourne plus
 Le Pi ne peut pas s'auto-surveiller (s'il meurt ou perd la 4G, il ne peut rien envoyer).
 On utilise donc un *dead man's switch* externe : [Healthchecks.io](https://healthchecks.io) (gratuit).
@@ -39,23 +75,24 @@ On utilise donc un *dead man's switch* externe : [Healthchecks.io](https://healt
    Pour recevoir l'alerte via *votre* bot : intégration **Webhook**, méthode GET, URL
    `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>&text=⚠️ HouseMonitor : $NAME est $STATUS`
 
+Le ping est envoyé par le listener toutes les `ping_interval_hours` (4 h par défaut, ~1 Mo/mois) **et**
+par le résumé du matin. Régler le check Healthchecks sur période *4 hours*, grâce *30 min*.
+
 Comportement :
 - run OK → ping → Healthchecks attend le prochain run.
 - run en erreur (HA injoignable, Telegram KO…) → ping `/fail` → **alerte immédiate**.
-- Pi éteint / plus de 4G / cron cassé → aucun ping → **alerte après période + grâce** (≈ 8h30 le matin).
-
-Optionnel, pour détecter une panne du Pi en moins de 24h : un second check "Pi alive" (période 1h)
-et une ligne cron `0 * * * * curl -fsS -m 10 --retry 3 -o /dev/null https://hc-ping.com/<uuid2>`.
-Coût : ~6 Ko × 24 = ~150 Ko/jour, ~4,5 Mo/mois. À doser selon votre forfait 4G.
+- Pi éteint / plus de 4G / listener mort → aucun ping → **alerte après période + grâce** (≤ 4h30).
 
 ## Consommation data (4G)
 Les appels à Home Assistant restent sur `127.0.0.1` : **zéro** trafic internet.
 Seuls le `git pull` et l'envoi Telegram sortent sur la 4G. Chaque exécution ajoute une ligne à `netlog.csv` :
 
 ```
-date,git_pull_octets,telegram_octets,total_octets
-2026-10-12 07:30,2140,8930,11070
+date,source,git_pull_octets,telegram_octets,total_octets
+2026-10-12 07:30,summary,2140,8930,11070
+2026-10-13 00:00,listener,0,190412,190412
 ```
+`source` = `summary` (une ligne par run du matin) ou `listener` (une ligne par jour, cumul des polls + pings).
 
 - `telegram_octets` : taille réelle requête + réponse, plus ~6 Ko estimés de handshake TLS.
 - `telegram_octets` inclut aussi le ping Healthchecks (~6 Ko).
@@ -64,4 +101,4 @@ date,git_pull_octets,telegram_octets,total_octets
   Forcer l'interface avec `IFACE=wwan0 ./run.sh` si besoin.
 
 Le message Telegram se termine par le cumul du mois (`📡 Data 4G du script ce mois : 310 Ko`).
-Ordre de grandeur attendu : ~10 à 15 Ko par jour, soit < 0,5 Mo par mois.
+Ordre de grandeur attendu : ~15 Ko/jour pour le résumé, ~170 Ko/jour pour le listener (réglage par défaut).

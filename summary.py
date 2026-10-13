@@ -14,19 +14,15 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-CFG = json.loads((Path(__file__).parent / "config.json").read_text())
+from common import CFG, count, heartbeat, load_state, log_net, month_total
+
 HA = CFG.get("ha_url", "http://127.0.0.1:8123")
 AUTH = {"Authorization": f"Bearer {CFG['ha_token']}"}
 HOURS = CFG.get("hours", 24)
 DOMAINS = CFG.get("domains", ["sensor", "binary_sensor", "switch", "light", "input_boolean"])
 EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
-NETLOG = Path(__file__).parent / "netlog.csv"
-TLS_OVERHEAD = 6000  # ~octets de handshake TLS par connexion (estimation)
-NET = {"sent": 0, "recv": 0}  # octets internet (Telegram + heartbeat, HA est en local)
-HC_URL = CFG.get("healthchecks_url", "")  # dead man's switch (https://hc-ping.com/<uuid>)
 
 
 def http(url, headers=None, data=None):
@@ -34,8 +30,8 @@ def http(url, headers=None, data=None):
     with urllib.request.urlopen(req, timeout=60) as r:
         raw = r.read()
         if not url.startswith(HA):  # trafic internet : on compte
-            NET["sent"] += len(data or b"") + len(str(req.header_items())) + 200
-            NET["recv"] += len(raw) + len(str(r.headers))
+            count(sent=len(data or b"") + len(str(req.header_items())) + 200,
+                  recv=len(raw) + len(str(r.headers)), new_connection=True)
         return json.loads(raw)
 
 
@@ -137,7 +133,6 @@ def build():
 def send(text):
     # Telegram limite à 4096 caractères par message
     for i in range(0, len(text), 4000):
-        NET["sent"] += TLS_OVERHEAD
         http(
             f"https://api.telegram.org/bot{CFG['telegram_token']}/sendMessage",
             data=urllib.parse.urlencode(
@@ -146,52 +141,22 @@ def send(text):
         )
 
 
-def heartbeat(ok=True):
-    """Ping Healthchecks.io ; /fail déclenche une alerte immédiate, aucun ping -> alerte après la grâce."""
-    if not HC_URL:
-        return
-    url = HC_URL if ok else HC_URL.rstrip("/") + "/fail"
-    try:
-        NET["sent"] += TLS_OVERHEAD
-        req = urllib.request.Request(url, data=b"", headers={"User-Agent": "housemonitor"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            NET["sent"] += 300
-            NET["recv"] += len(r.read()) + 200
-    except Exception as e:  # ne doit jamais faire échouer le résumé
-        print(f"heartbeat KO : {e}", file=sys.stderr)
-
-
-def log_net():
-    """Journal de la consommation internet : date, octets git pull, octets Telegram."""
-    git_bytes = int(os.environ.get("GIT_BYTES", 0))  # fourni par run.sh
-    tg_bytes = NET["sent"] + NET["recv"]
-    new = not NETLOG.exists()
-    with NETLOG.open("a") as f:
-        if new:
-            f.write("date,git_pull_octets,telegram_octets,total_octets\n")
-        f.write(f"{datetime.now():%Y-%m-%d %H:%M},{git_bytes},{tg_bytes},{git_bytes + tg_bytes}\n")
-    return git_bytes, tg_bytes
-
-
 def net_line():
-    """Conso cumulée du mois courant d'après netlog.csv."""
-    if not NETLOG.exists():
-        return ""
-    month = f"{datetime.now():%Y-%m}"
-    total = sum(int(l.split(",")[3]) for l in NETLOG.read_text().splitlines()[1:]
-                if l.startswith(month))
-    return f"\n\n📡 Data 4G du script ce mois : {total / 1024:.0f} Ko"
+    return f"\n\n📡 Data 4G du script ce mois : {month_total() / 1024:.0f} Ko"
 
 
 if __name__ == "__main__":
-    msg = build() + net_line()
+    git_bytes = int(os.environ.get("GIT_BYTES", 0))  # fourni par run.sh
     if "--dry" in sys.argv:
-        print(msg)
+        print(build() + net_line())
+    elif not load_state()["monitor"]:
+        heartbeat()  # le script a bien tourné, il est juste en pause (/stop monitor)
+        log_net("summary", git_bytes)
     else:
         try:
-            send(msg)
+            send(build() + net_line())
         except Exception:
             heartbeat(ok=False)
             raise
         heartbeat()
-        log_net()
+        log_net("summary", git_bytes)

@@ -4,6 +4,9 @@
   "telegram_token": "123456:ABC...",
   "telegram_chat_id": "123456789",
   "healthchecks_url": "",
+  "ping_interval_hours": 4,
+  "poll_timeout": 300,
+  "slow_poll_hours": 4,
   "hours": 24,
   "domains": ["sensor", "binary_sensor", "switch", "light", "input_boolean"],
   "exclude": ["sensor.sun_", "binary_sensor.updater", "sensor.time"]
