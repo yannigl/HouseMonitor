@@ -10,4 +10,12 @@ b0=$(rxtx)
 git pull -q --ff-only >> pull.log 2>&1
 b1=$(rxtx)
 
-GIT_BYTES=$((b1 - b0)) exec python3 summary.py "$@"
+GIT_BYTES=$((b1 - b0)) python3 summary.py "$@"
+rc=$?
+
+# Crash avant l'envoi (HA injoignable, config cassée...) : le script n'a pas pu pinger lui-même
+if [ $rc -ne 0 ]; then
+  hc=$(python3 -c 'import json;print(json.load(open("config.json")).get("healthchecks_url",""))' 2>/dev/null)
+  [ -n "$hc" ] && curl -fsS -m 15 --retry 2 -o /dev/null "${hc%/}/fail" --data-raw "exit $rc"
+fi
+exit $rc

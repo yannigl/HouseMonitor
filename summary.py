@@ -25,7 +25,8 @@ EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
 NETLOG = Path(__file__).parent / "netlog.csv"
 TLS_OVERHEAD = 6000  # ~octets de handshake TLS par connexion (estimation)
-NET = {"sent": 0, "recv": 0}  # octets internet (Telegram seulement, HA est en local)
+NET = {"sent": 0, "recv": 0}  # octets internet (Telegram + heartbeat, HA est en local)
+HC_URL = CFG.get("healthchecks_url", "")  # dead man's switch (https://hc-ping.com/<uuid>)
 
 
 def http(url, headers=None, data=None):
@@ -145,6 +146,21 @@ def send(text):
         )
 
 
+def heartbeat(ok=True):
+    """Ping Healthchecks.io ; /fail déclenche une alerte immédiate, aucun ping -> alerte après la grâce."""
+    if not HC_URL:
+        return
+    url = HC_URL if ok else HC_URL.rstrip("/") + "/fail"
+    try:
+        NET["sent"] += TLS_OVERHEAD
+        req = urllib.request.Request(url, data=b"", headers={"User-Agent": "housemonitor"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            NET["sent"] += 300
+            NET["recv"] += len(r.read()) + 200
+    except Exception as e:  # ne doit jamais faire échouer le résumé
+        print(f"heartbeat KO : {e}", file=sys.stderr)
+
+
 def log_net():
     """Journal de la consommation internet : date, octets git pull, octets Telegram."""
     git_bytes = int(os.environ.get("GIT_BYTES", 0))  # fourni par run.sh
@@ -172,5 +188,10 @@ if __name__ == "__main__":
     if "--dry" in sys.argv:
         print(msg)
     else:
-        send(msg)
+        try:
+            send(msg)
+        except Exception:
+            heartbeat(ok=False)
+            raise
+        heartbeat()
         log_net()
