@@ -43,10 +43,15 @@ def hm(dt):
     return f"{dt:%Hh%M}"
 
 
+def states():
+    """Tous les états HA, triés par entity_id."""
+    return sorted(http(f"{HA}/api/states", AUTH), key=lambda s: s["entity_id"])
+
+
 def discover():
     """Entités à résumer : {entity_id: (nom, unité)}."""
     out = {}
-    for s in http(f"{HA}/api/states", AUTH):
+    for s in states():
         eid = s["entity_id"]
         dom = eid.split(".")[0]
         if dom not in DOMAINS or any(eid.startswith(p) for p in EXCLUDE):
@@ -56,6 +61,33 @@ def discover():
             continue  # on ne garde que les capteurs numériques
         out[eid] = (attrs.get("friendly_name", eid), attrs.get("unit_of_measurement", ""))
     return out
+
+
+def list_text():
+    """/list : tous les appareils, groupés par domaine, avec leur entity_id."""
+    by_dom = defaultdict(list)
+    for s in states():
+        eid = s["entity_id"]
+        name = s.get("attributes", {}).get("friendly_name", eid)
+        by_dom[eid.split(".")[0]].append(f"• {name}  ({eid})")
+    out = [f"📋 {sum(len(v) for v in by_dom.values())} entités"]
+    for dom, lines in sorted(by_dom.items()):
+        out.append(f"\n[{dom}] {len(lines)}\n" + "\n".join(lines))
+    return "\n".join(out)
+
+
+def all_states_text():
+    """/update all : état actuel de toutes les entités, groupé par domaine."""
+    by_dom = defaultdict(list)
+    for s in states():
+        eid = s["entity_id"]
+        a = s.get("attributes", {})
+        val = f"{s['state']}{a.get('unit_of_measurement', '')}"
+        by_dom[eid.split(".")[0]].append(f"• {a.get('friendly_name', eid)} : {val}  ({ts(s):%d/%m %Hh%M})")
+    out = [f"🔄 États au {datetime.now():%d/%m %Hh%M}"]
+    for dom, lines in sorted(by_dom.items()):
+        out.append(f"\n[{dom}]\n" + "\n".join(lines))
+    return "\n".join(out)
 
 
 def history(entity_ids):

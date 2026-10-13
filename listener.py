@@ -4,6 +4,10 @@ pinge Healthchecks toutes les N heures. Lancé par systemd (housemonitor-listene
 
 Commandes (depuis le chat configuré uniquement) :
   /status                      état des services + data du mois
+  /list                        liste des appareils HA (nom + entity_id) par domaine
+  /update                      le résumé du matin, maintenant
+  /update all                  état actuel de toutes les entités (dernier changement)
+  Les réponses > 4000 caractères partent en pièce jointe .txt.
   /stop ping   | /start ping   heartbeat Healthchecks
   /stop monitor| /start monitor résumé du matin
   /stop listener               passe en mode éco : 1 appel toutes les `slow_poll_hours` h
@@ -15,9 +19,11 @@ import os
 import sys
 import time
 import urllib.parse
+import uuid
 from datetime import datetime
 from pathlib import Path
 
+import summary
 from common import CFG, SERVICES, count, heartbeat, load_state, log_net, month_total, save_state
 
 TOKEN = CFG["telegram_token"]
@@ -37,10 +43,11 @@ class Telegram:
     def __init__(self):
         self.conn = None
 
-    def call(self, method, **params):
-        body = urllib.parse.urlencode(params).encode()
+    def call(self, method, _body=None, _ctype=None, **params):
+        body = _body if _body is not None else urllib.parse.urlencode(params).encode()
         path = f"/bot{TOKEN}/{method}"
-        hdrs = {"Content-Type": "application/x-www-form-urlencoded", "Content-Length": str(len(body))}
+        hdrs = {"Content-Type": _ctype or "application/x-www-form-urlencoded",
+                "Content-Length": str(len(body))}
         for attempt in (1, 2):
             new = self.conn is None
             try:
@@ -56,6 +63,19 @@ class Telegram:
                 if attempt == 2:
                     raise
                 print(f"telegram : reconnexion ({e})", file=sys.stderr)
+
+    def reply(self, text, filename="housemonitor.txt"):
+        """Message court, ou pièce jointe .txt au-delà de la limite Telegram (4096)."""
+        if len(text) <= 4000:
+            return self.call("sendMessage", chat_id=CHAT_ID, text=text)
+        b = f"----{uuid.uuid4().hex}"
+        part = lambda name, val, extra="": (f"--{b}\r\nContent-Disposition: form-data; name=\"{name}\"{extra}"
+                                            f"\r\n\r\n").encode() + val + b"\r\n"
+        body = (part("chat_id", CHAT_ID.encode())
+                + part("caption", text.splitlines()[0].encode())
+                + part("document", text.encode(), f'; filename="{filename}"\r\nContent-Type: text/plain')
+                + f"--{b}--\r\n".encode())
+        return self.call("sendDocument", _body=body, _ctype=f"multipart/form-data; boundary={b}")
 
     def close(self):
         if self.conn:
@@ -85,7 +105,14 @@ def handle(text, st):
         return f"✅ {parts[1]} → {'start' if st[parts[1]] else 'stop'}{note}\n\n" + status_text(st)
     if cmd == "/status":
         return status_text(st)
-    return ("Commandes : /status, /stop|/start " + "|".join(SERVICES)
+    try:
+        if cmd == "/list":
+            return summary.list_text()
+        if cmd == "/update":
+            return summary.all_states_text() if parts[1:2] == ["all"] else summary.build()
+    except Exception as e:
+        return f"❌ Home Assistant : {e}"
+    return ("Commandes : /status, /list, /update [all], /stop|/start " + "|".join(SERVICES)
             + "\n\n" + status_text(st))
 
 
@@ -134,7 +161,7 @@ def main():
             if str(msg.get("chat", {}).get("id")) != CHAT_ID or "text" not in msg:
                 continue  # on n'obéit qu'à notre chat
             st = load_state()
-            tg.call("sendMessage", chat_id=CHAT_ID, text=handle(msg["text"], st))
+            tg.reply(handle(msg["text"], st))
 
 
 if __name__ == "__main__":

@@ -28,8 +28,16 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
    - `exclude` : préfixes d'`entity_id` à ignorer (ex. `sensor.sun_`).
 4. Tester : `python3 summary.py --dry` (affiche sans envoyer), puis `./run.sh`.
 5. Cron (`crontab -e`) pour 7h30 : `30 7 * * * /home/pi/HouseMonitor/run.sh`
+6. Listener : voir *Commandes Telegram* ci-dessous (service systemd, pas un cron).
 
 `run.sh` fait d'abord un `git pull` (mise à jour automatique du script, 1×/jour), puis lance `summary.py`.
+
+## Qui tourne comment
+| Service | Mécanisme | Lancement |
+|---|---|---|
+| résumé du matin (`summary.py`) | cron, 1×/jour | `30 7 * * * /home/pi/HouseMonitor/run.sh` |
+| listener (`listener.py`) | service systemd permanent | `sudo systemctl enable --now housemonitor-listener` |
+| ping Healthchecks | dans la boucle du listener (4 h) + fin du résumé | rien à lancer |
 
 ## Commandes Telegram (listener)
 `listener.py` tourne en permanence (service systemd) et écoute vos commandes sur le même bot :
@@ -37,11 +45,16 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 | Commande | Effet |
 |---|---|
 | `/status` | État des 3 services + data 4G du mois |
+| `/list` | Tous les appareils HA (nom + `entity_id`) groupés par domaine |
+| `/update` | Le résumé du matin, tout de suite |
+| `/update all` | État actuel de **toutes** les entités avec l'heure du dernier changement |
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
 | `/stop listener` / `/start listener` | Mode éco (1 appel toutes les `listener.slow_poll_hours`, 24 h) / mode réactif |
 
-Chaque réponse se termine par le statut des trois services. L'état est dans `state.json`.
+Les réponses de plus de 4 000 caractères (limite Telegram) arrivent en pièce jointe `.txt`, en un seul
+message. Les réponses `/stop`, `/start` et `/status` se terminent par le statut des trois services.
+L'état est dans `state.json`.
 Seuls les messages venant de votre `telegram_chat_id` sont pris en compte.
 
 Installation du service :
