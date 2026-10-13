@@ -83,6 +83,21 @@ class Telegram:
             self.conn = None
 
 
+COMMANDS = [
+    ("status", "État des services + data 4G du mois"),
+    ("list", "Appareils HA par domaine (nom + entity_id)"),
+    ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
+    ("stop", "stop listener|ping|monitor"),
+    ("start", "start listener|ping|monitor"),
+    ("help", "Cette aide"),
+]
+
+HELP = "🛠 Commandes\n" + "\n".join(f"/{c} — {d}" for c, d in COMMANDS) + (
+    "\n\nlistener : écoute Telegram (stop = mode éco, 1 appel / jour)"
+    "\nping : heartbeat Healthchecks (stop = alerte après la grâce)"
+    "\nmonitor : résumé du matin (stop = le cron tourne mais n'envoie rien)")
+
+
 def status_text(st):
     icon = lambda b: "🟢" if b else "🔴"
     mode = "long polling" if st["listener"] else f"éco (1 appel / {SLOW_POLL // 3600} h)"
@@ -105,6 +120,8 @@ def handle(text, st):
         return f"✅ {parts[1]} → {'start' if st[parts[1]] else 'stop'}{note}\n\n" + status_text(st)
     if cmd == "/status":
         return status_text(st)
+    if cmd == "/help":
+        return HELP
     try:
         if cmd == "/list":
             return summary.list_text()
@@ -112,8 +129,7 @@ def handle(text, st):
             return summary.all_states_text() if parts[1:2] == ["all"] else summary.build()
     except Exception as e:
         return f"❌ Home Assistant : {e}"
-    return ("Commandes : /status, /list, /update [all], /stop|/start " + "|".join(SERVICES)
-            + "\n\n" + status_text(st))
+    return f"❓ Commande inconnue : {text.split()[0] if parts else ''}\n\n" + HELP
 
 
 def main():
@@ -123,6 +139,10 @@ def main():
     last_log_day = datetime.now().day
     mtime = ME.stat().st_mtime
     print("listener démarré", flush=True)
+    try:  # menu "/" de Telegram ; ~0,6 Ko, une fois au démarrage
+        tg.call("setMyCommands", commands=json.dumps([{"command": c, "description": d} for c, d in COMMANDS]))
+    except Exception as e:
+        print(f"setMyCommands KO : {e}", file=sys.stderr)
     while True:
         st = load_state()
         now = time.time()

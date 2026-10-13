@@ -44,6 +44,7 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 
 | Commande | Effet |
 |---|---|
+| `/help` | Liste des commandes (aussi dans le menu « / » de Telegram) |
 | `/status` | État des 3 services + data 4G du mois |
 | `/list` | Tous les appareils HA (nom + `entity_id`) groupés par domaine |
 | `/update` | Le résumé du matin, tout de suite |
