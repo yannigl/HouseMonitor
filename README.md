@@ -22,6 +22,8 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 2. Telegram : créer un bot avec @BotFather (token), envoyer un message au bot, puis ouvrir
    `https://api.telegram.org/bot<TOKEN>/getUpdates` pour lire `chat.id`.
 3. `cp config.example.json config.json` et remplir les jetons.
+   - `healthchecks` : URL de ping + cadence (voir plus bas).
+   - `listener` : réglages du listener Telegram (voir plus bas).
    - `domains` : types d'entités inclus.
    - `exclude` : préfixes d'`entity_id` à ignorer (ex. `sensor.sun_`).
 4. Tester : `python3 summary.py --dry` (affiche sans envoyer), puis `./run.sh`.
@@ -37,7 +39,7 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 | `/status` | État des 3 services + data 4G du mois |
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
-| `/stop listener` / `/start listener` | Mode éco (1 appel toutes les `slow_poll_hours` h) / mode réactif |
+| `/stop listener` / `/start listener` | Mode éco (1 appel toutes les `listener.slow_poll_hours`, 24 h) / mode réactif |
 
 Chaque réponse se termine par le statut des trois services. L'état est dans `state.json`.
 Seuls les messages venant de votre `telegram_chat_id` sont pris en compte.
@@ -56,27 +58,43 @@ Le listener se relance tout seul quand le `git pull` du matin modifie `listener.
 ### Coût data du listener
 Pas de webhook possible derrière la 4G : le Pi interroge Telegram (`getUpdates`) en **long polling sur
 une connexion persistante**. Le handshake TLS (~6 Ko) n'est payé qu'à la connexion, ensuite chaque appel
-vide coûte ~0,6 Ko. Réglable via `poll_timeout` (secondes) dans `config.json` :
+vide coûte ~0,6 Ko. Réglable via `listener.poll_timeout` (secondes) dans `config.json` :
 
 | `poll_timeout` | appels / jour | data / mois | réactivité |
 |---|---|---|---|
 | 60 | 1 440 | ~26 Mo | immédiate |
 | 300 (défaut) | 288 | ~5 Mo | immédiate |
 | 600 | 144 | ~2,6 Mo | immédiate, mais le NAT 4G peut couper (= reconnexion, 6 Ko) |
-| `/stop listener` | 6 | ~1 Mo | jusqu'à 4 h |
+| `/stop listener` | 1 | ~0,2 Mo | jusqu'à 24 h (le ping Healthchecks continue toutes les 4 h) |
 
 ## Surveillance : être alerté si le script ne tourne plus
 Le Pi ne peut pas s'auto-surveiller (s'il meurt ou perd la 4G, il ne peut rien envoyer).
 On utilise donc un *dead man's switch* externe : [Healthchecks.io](https://healthchecks.io) (gratuit).
 
-1. Créer un compte, puis un check **"HouseMonitor résumé"** : période *1 day*, grâce *1 hour*.
-2. Copier son URL de ping (`https://hc-ping.com/xxxxxxxx-...`) dans `config.json` → `healthchecks_url`.
-3. Onglet **Integrations** : ajouter **Email** et/ou **Telegram** (leur bot @HealthchecksBot, 2 clics).
-   Pour recevoir l'alerte via *votre* bot : intégration **Webhook**, méthode GET, URL
-   `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>&text=⚠️ HouseMonitor : $NAME est $STATUS`
+### Créer le check
+*Add Check* → **Name** `MyHouseMonitor`, **Schedule** Simple, **Period** `4 hours`, **Grace** `1 hour`.
+Ces deux valeurs doivent correspondre à `healthchecks.period_hours` / `grace_hours` dans `config.json`
+(le script ne les envoie pas à Healthchecks, il s'en sert pour afficher "alerte après X h" dans `/status`).
 
-Le ping est envoyé par le listener toutes les `ping_interval_hours` (4 h par défaut, ~1 Mo/mois) **et**
-par le résumé du matin. Régler le check Healthchecks sur période *4 hours*, grâce *30 min*.
+**Tags** : facultatif, ce sont juste des étiquettes pour filtrer le tableau de bord quand on a plusieurs
+checks (ex. `pi maison`). Avec un seul check, laissez vide.
+
+Une fois créé, cliquez sur le check : l'URL de ping (`https://hc-ping.com/xxxxxxxx-…`) est affichée en haut.
+Copiez-la dans `config.json` → `healthchecks.url`. Vous pouvez supprimer "My First Check".
+
+### Être alerté
+Onglet **Integrations** (menu du haut) :
+- **Email** : déjà présent sur l'adresse du compte, vérifiez qu'il est bien associé au check.
+- **Telegram** : *Add Integration* → Telegram → suivre le lien vers leur bot @HealthchecksBot → *Start*.
+  C'est un autre bot que le vôtre : si votre token casse, l'alerte arrive quand même.
+- Variante avec *votre* bot : intégration **Webhook**, méthode GET, URL
+  `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>&text=⚠️ HouseMonitor : $NAME est $STATUS`
+
+Conseil : Email **+** Telegram, deux canaux indépendants pour zéro coût.
+
+### Qui pinge et quand
+Le listener pinge toutes les `healthchecks.ping_interval_hours` (4 h, ~6 Ko/ping ≈ 1 Mo/mois),
+et le résumé du matin pinge aussi. Avec période 4 h + grâce 1 h, une panne est signalée en 5 h max.
 
 Comportement :
 - run OK → ping → Healthchecks attend le prochain run.

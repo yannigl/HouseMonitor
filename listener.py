@@ -22,9 +22,12 @@ from common import CFG, SERVICES, count, heartbeat, load_state, log_net, month_t
 
 TOKEN = CFG["telegram_token"]
 CHAT_ID = str(CFG["telegram_chat_id"])
-POLL_TIMEOUT = CFG.get("poll_timeout", 300)        # s, durée max d'un long poll
-SLOW_POLL = CFG.get("slow_poll_hours", 4) * 3600    # s, mode éco (/stop listener)
-PING_EVERY = CFG.get("ping_interval_hours", 4) * 3600
+TG = CFG.get("listener", {})
+HC = CFG.get("healthchecks", {})
+POLL_TIMEOUT = TG.get("poll_timeout", 300)          # s, durée max d'un long poll
+SLOW_POLL = TG.get("slow_poll_hours", 24) * 3600    # s, mode éco (/stop listener)
+PING_EVERY = HC.get("ping_interval_hours", 4) * 3600
+ALERT_AFTER = HC.get("period_hours", 4) + HC.get("grace_hours", 1)
 ME = Path(__file__)
 
 
@@ -65,7 +68,7 @@ def status_text(st):
     mode = "long polling" if st["listener"] else f"éco (1 appel / {SLOW_POLL // 3600} h)"
     return (f"{icon(st['listener'])} listener : {mode}\n"
             f"{icon(st['ping'])} ping Healthchecks : {'actif' if st['ping'] else 'arrêté'}"
-            f" (toutes les {PING_EVERY // 3600} h)\n"
+            f" (toutes les {PING_EVERY // 3600} h, alerte après {ALERT_AFTER} h sans ping)\n"
             f"{icon(st['monitor'])} monitor (résumé du matin) : {'actif' if st['monitor'] else 'arrêté'}\n"
             f"📡 Data 4G ce mois : {month_total() / 1024:.0f} Ko")
 
@@ -89,7 +92,7 @@ def handle(text, st):
 def main():
     tg = Telegram()
     offset = 0
-    last_ping = 0.0
+    last_ping = last_poll = 0.0
     last_log_day = datetime.now().day
     mtime = ME.stat().st_mtime
     print("listener démarré", flush=True)
@@ -110,9 +113,16 @@ def main():
             log_net("listener")
             os.execv(sys.executable, [sys.executable, str(ME)])
 
+        if not st["listener"] and now - last_poll < SLOW_POLL:
+            # mode éco : on dort jusqu'au prochain ping ou au prochain poll, sans toucher au réseau
+            tg.close()
+            time.sleep(max(60, min(last_ping + PING_EVERY, last_poll + SLOW_POLL) - now))
+            continue
+
         try:
             res = tg.call("getUpdates", offset=offset, timeout=POLL_TIMEOUT if st["listener"] else 0,
                           allowed_updates='["message"]')
+            last_poll = time.time()
         except Exception as e:
             print(f"getUpdates KO : {e}", file=sys.stderr)
             time.sleep(60)
@@ -125,10 +135,6 @@ def main():
                 continue  # on n'obéit qu'à notre chat
             st = load_state()
             tg.call("sendMessage", chat_id=CHAT_ID, text=handle(msg["text"], st))
-
-        if not load_state()["listener"]:
-            tg.close()  # mode éco : on ferme et on dort, un handshake par réveil
-            time.sleep(min(SLOW_POLL, PING_EVERY))
 
 
 if __name__ == "__main__":

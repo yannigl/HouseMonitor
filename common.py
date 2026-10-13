@@ -9,7 +9,7 @@ HERE = Path(__file__).parent
 CFG = json.loads((HERE / "config.json").read_text())
 STATE_FILE = HERE / "state.json"
 NETLOG = HERE / "netlog.csv"
-HC_URL = CFG.get("healthchecks_url", "")
+HC_URL = CFG.get("healthchecks", {}).get("url", "")
 TLS_OVERHEAD = 6000  # ~octets d'un handshake TLS (estimation, invisible depuis Python)
 NET = {"sent": 0, "recv": 0}  # octets internet du processus courant (HA est en local)
 
