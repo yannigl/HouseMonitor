@@ -4,3 +4,4 @@ netlog.csv
 pull.log
 run.log
 __pycache__/
+data_cycle.json

@@ -15,7 +15,7 @@ import urllib.request
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from common import CFG, count, heartbeat, load_state, log_net, month_total
+from common import CFG, count, cycle_line, heartbeat, load_state, log_net
 
 HA = CFG.get("ha_url", "http://127.0.0.1:8123")
 AUTH = {"Authorization": f"Bearer {CFG['ha_token']}"}
@@ -174,7 +174,7 @@ def send(text):
 
 
 def net_line():
-    return f"\n\n📡 Data 4G du script ce mois : {month_total() / 1024:.0f} Ko"
+    return f"\n\n📡 Data 4G : {cycle_line()}"
 
 
 if __name__ == "__main__":

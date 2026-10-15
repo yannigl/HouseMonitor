@@ -45,7 +45,9 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 | Commande | Effet |
 |---|---|
 | `/help` | Liste des commandes (aussi dans le menu « / » de Telegram) |
-| `/status` | État des 3 services + data 4G du mois |
+| `/status` | État des 3 services + data 4G |
+| `/data` | Data 4G utilisée depuis le dernier reset |
+| `/data reset` | Remet le compteur à 0 ; remise à zéro automatique le même jour du mois suivant |
 | `/list` | Tous les appareils HA (nom + `entity_id`) groupés par domaine |
 | `/update` | Le résumé du matin, tout de suite |
 | `/update all` | État actuel de **toutes** les entités avec l'heure du dernier changement |
@@ -132,5 +134,10 @@ date,source,git_pull_octets,telegram_octets,total_octets
   (approximatif : inclut ce que HA envoie pendant ces quelques secondes).
   Forcer l'interface avec `IFACE=wwan0 ./run.sh` si besoin.
 
-Le message Telegram se termine par le cumul du mois (`📡 Data 4G du script ce mois : 310 Ko`).
+Le message Telegram se termine par le cumul du cycle (`📡 Data 4G : 310 Ko depuis le 13/10 (remise à zéro auto le 13/11)`).
+
+**Cycle de comptage** : par défaut du 1er au 1er du mois. `/data reset` fait démarrer un nouveau cycle
+maintenant ; il se remet à zéro seul à minuit le même jour du mois suivant (calez-le sur le jour de
+renouvellement de votre forfait 4G). Si ce jour n'existe pas (31 → février), c'est le dernier jour du mois.
+`netlog.csv` n'est jamais effacé, seul le point de départ du cycle (`data_cycle.json`) change.
 Ordre de grandeur attendu : ~15 Ko/jour pour le résumé, ~170 Ko/jour pour le listener (réglage par défaut).

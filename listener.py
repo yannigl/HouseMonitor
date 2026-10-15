@@ -3,7 +3,9 @@
 pinge Healthchecks toutes les N heures. Lancé par systemd (housemonitor-listener.service).
 
 Commandes (depuis le chat configuré uniquement) :
-  /status                      état des services + data du mois
+  /status                      état des services + data 4G
+  /data                        data 4G utilisée depuis le dernier reset
+  /data reset                  remet le compteur à 0 (puis reset auto le même jour du mois suivant)
   /list                        liste des appareils HA (nom + entity_id) par domaine
   /update                      le résumé du matin, maintenant
   /update all                  état actuel de toutes les entités (dernier changement)
@@ -24,7 +26,8 @@ from datetime import datetime
 from pathlib import Path
 
 import summary
-from common import CFG, SERVICES, count, heartbeat, load_state, log_net, month_total, save_state
+from common import (CFG, SERVICES, count, cycle_line, heartbeat, load_state, log_net,
+                    reset_cycle, save_state)
 
 TOKEN = CFG["telegram_token"]
 CHAT_ID = str(CFG["telegram_chat_id"])
@@ -84,7 +87,8 @@ class Telegram:
 
 
 COMMANDS = [
-    ("status", "État des services + data 4G du mois"),
+    ("status", "État des services + data 4G"),
+    ("data", "Data 4G utilisée — /data reset : remise à zéro"),
     ("list", "Appareils HA par domaine (nom + entity_id)"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
     ("stop", "stop listener|ping|monitor"),
@@ -105,7 +109,7 @@ def status_text(st):
             f"{icon(st['ping'])} ping Healthchecks : {'actif' if st['ping'] else 'arrêté'}"
             f" (toutes les {PING_EVERY // 3600} h, alerte après {ALERT_AFTER} h sans ping)\n"
             f"{icon(st['monitor'])} monitor (résumé du matin) : {'actif' if st['monitor'] else 'arrêté'}\n"
-            f"📡 Data 4G ce mois : {month_total() / 1024:.0f} Ko")
+            f"📡 Data 4G : {cycle_line()}")
 
 
 def handle(text, st):
@@ -122,6 +126,13 @@ def handle(text, st):
         return status_text(st)
     if cmd == "/help":
         return HELP
+    if cmd == "/data":
+        if parts[1:2] == ["reset"]:
+            before = cycle_line()
+            log_net("listener")  # les octets en cours restent dans l'ancien cycle
+            reset_cycle()
+            return f"✅ Compteur remis à zéro (était : {before})\n\n📡 Data 4G : {cycle_line()}"
+        return f"📡 Data 4G : {cycle_line()}"
     try:
         if cmd == "/list":
             return summary.list_text()

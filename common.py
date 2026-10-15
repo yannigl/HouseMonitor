@@ -1,13 +1,15 @@
 """Partagé entre summary.py et listener.py : config, état, compteur data, heartbeat."""
+import calendar
 import json
 import sys
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).parent
 CFG = json.loads((HERE / "config.json").read_text())
 STATE_FILE = HERE / "state.json"
+CYCLE_FILE = HERE / "data_cycle.json"
 NETLOG = HERE / "netlog.csv"
 HC_URL = CFG.get("healthchecks", {}).get("url", "")
 TLS_OVERHEAD = 6000  # ~octets d'un handshake TLS (estimation, invisible depuis Python)
@@ -56,14 +58,53 @@ def log_net(source, git_bytes=0):
     with NETLOG.open("a") as f:
         if new:
             f.write("date,source,git_pull_octets,telegram_octets,total_octets\n")
-        f.write(f"{datetime.now():%Y-%m-%d %H:%M},{source},{git_bytes},{tg},{git_bytes + tg}\n")
+        f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S},{source},{git_bytes},{tg},{git_bytes + tg}\n")
     NET["sent"] = NET["recv"] = 0
 
 
-def month_total():
-    """Octets internet cumulés ce mois d'après netlog.csv."""
-    if not NETLOG.exists():
-        return 0
-    month = f"{datetime.now():%Y-%m}"
-    return sum(int(l.split(",")[-1]) for l in NETLOG.read_text().splitlines()[1:]
-               if l.startswith(month))
+# --- cycle de comptage de la data : du jour de reset au même jour du mois suivant ---
+
+def _next_boundary(start, day):
+    """Minuit du jour `day` du mois suivant `start` (ramené à la fin du mois si besoin : 31 -> 30/28)."""
+    y, m = (start.year + 1, 1) if start.month == 12 else (start.year, start.month + 1)
+    return datetime(y, m, min(day, calendar.monthrange(y, m)[1]))
+
+
+def cycle():
+    """(début du cycle, jour d'ancrage). Par défaut : le 1er du mois courant. Avance tout seul."""
+    now = datetime.now()
+    try:
+        c = json.loads(CYCLE_FILE.read_text())
+        start, day = datetime.fromisoformat(c["start"]), int(c["day"])
+    except (OSError, ValueError, KeyError):
+        start, day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), 1
+    rolled = False
+    while now >= _next_boundary(start, day):
+        start, rolled = _next_boundary(start, day), True
+    if rolled or not CYCLE_FILE.exists():
+        CYCLE_FILE.write_text(json.dumps({"start": start.isoformat(), "day": day}))
+    return start, day
+
+
+def reset_cycle():
+    """/data reset : le compteur repart de 0 maintenant, prochain reset le même jour du mois suivant."""
+    now = datetime.now()
+    CYCLE_FILE.write_text(json.dumps({"start": now.isoformat(timespec="seconds"), "day": now.day}))
+
+
+def cycle_total():
+    """Octets internet du cycle courant : netlog.csv depuis le début du cycle + compteur du process en cours."""
+    start, _ = cycle()
+    since = f"{start:%Y-%m-%d %H:%M:%S}"
+    total = NET["sent"] + NET["recv"]
+    if NETLOG.exists():
+        total += sum(int(l.split(",")[-1]) for l in NETLOG.read_text().splitlines()[1:]
+                     if l.split(",")[0] > since)
+    return total
+
+
+def cycle_line():
+    """Ex. : '312 Ko depuis le 13/10 (remise à zéro auto le 13/11)'."""
+    start, day = cycle()
+    return (f"{cycle_total() / 1024:.0f} Ko depuis le {start:%d/%m} "
+            f"(remise à zéro auto le {_next_boundary(start, day):%d/%m})")
