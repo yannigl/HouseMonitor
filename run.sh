@@ -7,7 +7,7 @@ IFACE=${IFACE:-$(ip route show default | awk '{print $5; exit}')}
 rxtx() { awk -v i="$IFACE:" '$1==i {print $2+$10}' /proc/net/dev; }
 
 b0=$(rxtx)
-git pull -q --ff-only >> pull.log 2>&1
+git pull -q --ff-only origin "$(git rev-parse --abbrev-ref HEAD)" >> pull.log 2>&1
 b1=$(rxtx)
 
 echo "--- $(date '+%F %T') run" >> run.log
