@@ -10,8 +10,10 @@ b0=$(rxtx)
 git pull -q --ff-only >> pull.log 2>&1
 b1=$(rxtx)
 
-GIT_BYTES=$((b1 - b0)) python3 summary.py "$@"
+echo "--- $(date '+%F %T') run" >> run.log
+GIT_BYTES=$((b1 - b0)) python3 summary.py "$@" 2>> run.log
 rc=$?
+echo "exit $rc" >> run.log
 
 # Crash avant l'envoi (HA injoignable, config cassée...) : le script n'a pas pu pinger lui-même
 [ $rc -ne 0 ] && python3 -c 'from common import heartbeat; heartbeat(ok=False)' 
