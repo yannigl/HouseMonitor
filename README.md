@@ -28,6 +28,8 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
    - `exclude` : préfixes d'`entity_id` à ignorer (ex. `sensor.sun_`).
 4. Tester : `python3 summary.py --dry` (affiche sans envoyer), puis `./run.sh`.
 5. Cron (`crontab -e`) pour 7h30 : `30 7 * * * /home/pi/HouseMonitor/run.sh`
+   Vérifier qu'il n'y a qu'**une** ligne : `crontab -l`. Si elle est en double :
+   `crontab -l | awk '!seen[$0]++' | crontab -` (`run.sh` ignore de toute façon un second run simultané).
 6. Listener : voir *Commandes Telegram* ci-dessous (service systemd, pas un cron).
 
 `run.sh` fait d'abord un `git pull` (mise à jour automatique du script, 1×/jour), puis lance `summary.py`.

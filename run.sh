@@ -2,6 +2,14 @@
 # Lancé par cron : git pull (mise à jour auto du script) puis envoi du résumé.
 # Mesure les octets du git pull sur l'interface par défaut (4G) et les passe au script.
 cd "$(dirname "$0")" || exit 1
+
+# Un seul run à la fois : une ligne cron en double ou un run manuel pendant celui de 7h30
+# ne doivent ni envoyer deux résumés ni doubler les pings.
+if command -v flock >/dev/null 2>&1; then
+  exec 9> .run.lock
+  flock -n 9 || { echo "--- $(date '+%F %T') run ignoré : un autre run est en cours" >> run.log; exit 0; }
+fi
+
 PATH=/usr/local/sbin:/usr/sbin:/sbin:$PATH  # cron n'a pas sbin, où se trouve `ip`
 
 IFACE=${IFACE:-$(ip route show default 2>/dev/null | awk '{print $5; exit}')}

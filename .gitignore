@@ -5,3 +5,4 @@ pull.log
 run.log
 __pycache__/
 data_cycle.json
+.run.lock
