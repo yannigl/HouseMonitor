@@ -10,6 +10,7 @@ Découvre toutes les entités via /api/states, puis résume selon le type :
 import json
 import os
 import sys
+import traceback
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -129,7 +130,7 @@ def alert_line(name, states):
     return f"{name} : {len(ev)} alerte{'s' if len(ev) > 1 else ''} ({times})"
 
 
-def cycle_line(name, states):
+def switch_line(name, states):
     ev = on_events(states)
     cur = "allumé" if states and states[-1]["state"] == "on" else "éteint"
     if not ev:
@@ -152,7 +153,7 @@ def build():
             line = alert_line(name, states)
             key = "🚨 Alertes"
         else:
-            line = cycle_line(name, states)
+            line = switch_line(name, states)
             key = "🔌 Switchs / lumières"
         if line:
             sections[key].append("• " + line)
@@ -177,18 +178,36 @@ def net_line():
     return f"\n\n📡 Data 4G : {cycle_line()}"
 
 
-if __name__ == "__main__":
-    git_bytes = int(os.environ.get("GIT_BYTES", 0))  # fourni par run.sh
+def main():
+    try:
+        git_bytes = int(os.environ.get("GIT_BYTES") or 0)  # fourni par run.sh
+    except ValueError:
+        git_bytes = 0
     if "--dry" in sys.argv:
         print(build() + net_line())
-    elif not load_state()["monitor"]:
+        return
+    if not load_state()["monitor"]:
         heartbeat()  # le script a bien tourné, il est juste en pause (/stop monitor)
         log_net("summary", git_bytes)
-    else:
+        return
+    try:
         try:
-            send(build() + net_line())
-        except Exception:
-            heartbeat(ok=False)
-            raise
-        heartbeat()
+            footer = net_line()
+        except Exception:  # le compteur de data ne doit jamais empêcher le résumé
+            footer = ""
+            traceback.print_exc()
+        send(build() + footer)
+    except Exception:
+        err = traceback.format_exc()
+        print(err, file=sys.stderr)
+        heartbeat(ok=False, body=err)  # la trace est lisible dans le Log du check
+        sys.exit(3)  # 3 = échec déjà signalé à Healthchecks (run.sh ne le redouble pas)
+    heartbeat()
+    try:
         log_net("summary", git_bytes)
+    except Exception:  # la comptabilité ne doit pas transformer un envoi réussi en alerte
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()

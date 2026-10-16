@@ -36,13 +36,14 @@ def count(sent=0, recv=0, new_connection=False):
     NET["recv"] += recv
 
 
-def heartbeat(ok=True):
-    """Ping Healthchecks.io ; /fail déclenche une alerte immédiate, aucun ping -> alerte après la grâce."""
+def heartbeat(ok=True, body=""):
+    """Ping Healthchecks.io ; /fail déclenche une alerte immédiate, aucun ping -> alerte après la grâce.
+    `body` (erreur, trace) est visible dans l'onglet Log du check, sur la ligne de ce ping."""
     if not HC_URL or not load_state()["ping"]:
         return False
     url = HC_URL if ok else HC_URL.rstrip("/") + "/fail"
     try:
-        req = urllib.request.Request(url, data=b"", headers={"User-Agent": "housemonitor"})
+        req = urllib.request.Request(url, data=body[-2000:].encode(), headers={"User-Agent": "housemonitor"})
         with urllib.request.urlopen(req, timeout=15) as r:
             count(sent=300, recv=len(r.read()) + 200, new_connection=True)
         return True
