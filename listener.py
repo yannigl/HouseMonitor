@@ -12,6 +12,7 @@ Commandes (depuis le chat configuré uniquement) :
   Les réponses > 4000 caractères partent en pièce jointe .txt.
   /stop ping   | /start ping   heartbeat Healthchecks
   /stop monitor| /start monitor résumé du matin
+  /shutdown                    éteint le Pi après confirmation (/shutdown confirm), alias : /stop pi
   /stop listener               passe en mode éco : 1 appel toutes les `slow_poll_hours` h
   /start listener              retour au long polling (réactif)
 """
@@ -19,6 +20,7 @@ import http.client
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -38,6 +40,10 @@ POLL_TIMEOUT = TG.get("poll_timeout", 300)          # s, durée max d'un long po
 SLOW_POLL = TG.get("slow_poll_hours", 24) * 3600    # s, mode éco (/stop listener)
 PING_EVERY = HC.get("ping_interval_hours", 4) * 3600
 ALERT_AFTER = HC.get("period_hours", 4) + HC.get("grace_hours", 1)
+SHUTDOWN_SIGNAL = CFG.get("shutdown", {}).get("healthchecks", "fail")  # "fail" | "log" | "none"
+CONFIRM_WINDOW = 60   # s pour confirmer /shutdown
+SHUTDOWN_DELAY = 5    # s entre l'acquittement et l'extinction
+PENDING = {"t": None}  # demande d'extinction en attente (en mémoire : perdue au reboot, voulu)
 ME = Path(__file__)
 
 
@@ -92,6 +98,7 @@ COMMANDS = [
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA par domaine (nom + entity_id)"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
+    ("shutdown", "Éteindre le Pi (avec confirmation)"),
     ("stop", "stop listener|ping|monitor"),
     ("start", "start listener|ping|monitor"),
     ("help", "Cette aide"),
@@ -101,6 +108,53 @@ HELP = "🛠 Commandes\n" + "\n".join(f"/{c} — {d}" for c, d in COMMANDS) + (
     "\n\nlistener : écoute Telegram (stop = mode éco, 1 appel / jour)"
     "\nping : heartbeat Healthchecks (stop = alerte après la grâce)"
     "\nmonitor : résumé du matin (stop = le cron tourne mais n'envoie rien)")
+
+
+def can_poweroff():
+    """Le droit d'éteindre est-il en place (règle sudoers de setup-power.sh) ?"""
+    if os.geteuid() == 0:
+        return True
+    try:
+        return subprocess.run(["sudo", "-n", "-l", "systemctl", "poweroff"], capture_output=True,
+                              timeout=10).returncode == 0
+    except Exception:
+        return False
+
+
+def shutdown_signal_text(st):
+    if SHUTDOWN_SIGNAL == "none" or not st["ping"]:
+        return "aucun" + (" (ping désactivé)" if not st["ping"] else "")
+    return {"fail": "/fail (alerte DOWN immédiate, puis UP au redémarrage)",
+            "log": "/log (note dans le journal, sans alerte)"}.get(SHUTDOWN_SIGNAL, "aucun")
+
+
+def power_off(tg, offset):
+    """Exécuté APRÈS l'envoi de l'acquittement."""
+    st = load_state()
+    # 1. Acquitter la commande chez Telegram : sans cela elle serait relivrée au prochain démarrage.
+    try:
+        tg.call("getUpdates", offset=offset, timeout=0)
+    except Exception as e:
+        print(f"acquittement Telegram KO : {e}", file=sys.stderr)
+    # 2. Signal à Healthchecks
+    signalled = False
+    if SHUTDOWN_SIGNAL == "fail":
+        signalled = heartbeat(ok=False, body="arrêt volontaire demandé par /shutdown")
+    elif SHUTDOWN_SIGNAL == "log":
+        heartbeat(endpoint="/log", body="arrêt volontaire demandé par /shutdown")
+    # 3. Enregistrer la data en cours (les compteurs repartent à 0 au prochain démarrage)
+    try:
+        log_net("listener")
+        pi_cum()
+    except Exception as e:
+        print(f"enregistrement data KO : {e}", file=sys.stderr)
+    time.sleep(SHUTDOWN_DELAY)
+    cmd = ["systemctl", "poweroff"] if os.geteuid() == 0 else ["sudo", "-n", "systemctl", "poweroff"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:  # le Pi tourne toujours : on annule l'échec signalé
+        if signalled:
+            heartbeat()
+        tg.reply(f"❌ Extinction impossible : {(r.stderr or r.stdout).strip()[:300]}")
 
 
 def status_text(st):
@@ -116,6 +170,23 @@ def status_text(st):
 def handle(text, st):
     parts = text.lower().split()
     cmd = parts[0].split("@")[0] if parts else ""
+    args = parts[1:]
+    if cmd == "/stop" and args[:1] == ["pi"]:
+        cmd, args = "/shutdown", args[1:]
+    if cmd == "/shutdown":
+        if args[:1] != ["confirm"]:
+            if not can_poweroff():
+                return "❌ Extinction non autorisée : lancez d'abord sudo ./setup-power.sh sur le Pi."
+            PENDING["t"] = time.monotonic()
+            return (f"⚠️ Éteindre le Pi ?\n• signal Healthchecks : {shutdown_signal_text(st)}\n"
+                    "• il ne redémarrera pas seul : il faudra remettre le courant (ou le débrancher/rebrancher)\n\n"
+                    f"Confirmez dans les {CONFIRM_WINDOW} s : /shutdown confirm")
+        t = PENDING["t"]
+        PENDING["t"] = None
+        if t is None or time.monotonic() - t > CONFIRM_WINDOW:
+            return "Aucune demande d'extinction en attente (ou expirée). Refaites /shutdown."
+        return (f"⏻ Extinction dans {SHUTDOWN_DELAY} s.\nSignal Healthchecks : {shutdown_signal_text(st)}.\n"
+                "Le Pi redémarrera quand le courant sera remis.", power_off)
     if cmd in ("/stop", "/start") and len(parts) > 1 and parts[1] in SERVICES:
         st[parts[1]] = cmd == "/start"
         save_state(st)
@@ -198,7 +269,11 @@ def loop():
             if str(msg.get("chat", {}).get("id")) != CHAT_ID or "text" not in msg:
                 continue  # on n'obéit qu'à notre chat
             st = load_state()
-            tg.reply(handle(msg["text"], st))
+            out = handle(msg["text"], st)
+            text, after = out if isinstance(out, tuple) else (out, None)
+            tg.reply(text)
+            if after:
+                after(tg, offset)
 
 
 def main():

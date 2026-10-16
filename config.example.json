@@ -11,6 +11,10 @@
     "grace_hours": 1
   },
 
+  "shutdown": {
+    "healthchecks": "fail"
+  },
+
   "listener": {
     "poll_timeout": 300,
     "slow_poll_hours": 24

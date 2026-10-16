@@ -55,6 +55,7 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 | `/update all` | État actuel de **toutes** les entités avec l'heure du dernier changement |
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
+| `/shutdown` (alias `/stop pi`) | Éteint le Pi après confirmation par `/shutdown confirm` (voir *Éteindre le Pi à distance*) |
 | `/stop listener` / `/start listener` | Mode éco (1 appel toutes les `listener.slow_poll_hours`, 24 h) / mode réactif |
 
 Les réponses de plus de 4 000 caractères (limite Telegram) arrivent en pièce jointe `.txt`, en un seul
@@ -72,6 +73,42 @@ journalctl -u housemonitor-listener -f       # logs en direct
 ```
 (Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
+
+### Éteindre le Pi à distance (`/shutdown`)
+Pour une coupure de courant prévue. Installation, **une fois** : `sudo ./setup-power.sh` (règle `sudoers`
+limitée à la seule commande `systemctl poweroff`).
+
+```
+vous    : /shutdown
+bot     : ⚠️ Éteindre le Pi ?  • signal Healthchecks : /fail …  Confirmez dans les 60 s : /shutdown confirm
+vous    : /shutdown confirm
+bot     : ⏻ Extinction dans 5 s. …            (acquittement)
+```
+Ensuite, dans l'ordre : acquittement de la commande chez Telegram, signal à Healthchecks, enregistrement des
+compteurs de data, extinction. Si l'extinction échoue, le `/fail` est annulé par un ping OK et l'erreur vous est envoyée.
+
+Garde-fous :
+- **Confirmation obligatoire** (60 s) : `/stop pi` est à une lettre de `/stop ping`, une faute de frappe ne doit pas
+  éteindre une machine que l'on ne peut rallumer qu'en la rebranchant.
+- La demande en attente n'existe qu'en mémoire : si Telegram rejouait `/shutdown confirm` au redémarrage, elle serait
+  ignorée (le Pi n'a pas d'horloge à pile, on ne peut pas se fier à l'âge du message). La commande est en outre
+  acquittée chez Telegram avant l'extinction.
+- Sans la règle `sudoers`, `/shutdown` refuse **avant** d'envoyer quoi que ce soit.
+
+Signal envoyé à Healthchecks, réglable dans `config.json` → `shutdown.healthchecks` :
+
+| Valeur | Effet | À choisir si |
+|---|---|---|
+| `"fail"` (défaut) | Alerte DOWN immédiate (mail + Telegram), puis alerte UP au redémarrage avec la durée d'arrêt | vous voulez une confirmation et la durée exacte de la coupure |
+| `"log"` | Note « arrêt volontaire » dans le journal du check, **sans alerte** ; si le Pi revient avant période + grâce (5 h), aucune alerte, sinon DOWN | vous ne voulez pas d'alerte pour un arrêt voulu |
+| `"none"` | Rien | — |
+
+Mettre le check en *pause* (API Healthchecks, clé d'API requise) n'est pas proposé : un check en pause n'alerte
+plus, donc si le Pi ne redémarre pas après la coupure, personne ne le saurait.
+
+Le Pi **ne redémarre pas tout seul** après un arrêt : il repart quand le courant est coupé puis remis (ou en le
+débranchant/rebranchant). Home Assistant (Docker, `unless-stopped`) revient avec lui. Ne faites pas `docker stop`
+avant : un conteneur arrêté à la main n'est pas relancé au démarrage avec cette politique.
 
 ### Coût data du listener
 Pas de webhook possible derrière la 4G : le Pi interroge Telegram (`getUpdates`) en **long polling sur
