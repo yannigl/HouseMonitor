@@ -6,3 +6,5 @@ run.log
 __pycache__/
 data_cycle.json
 .run.lock
+netcount_state.json
+.netcount.lock

@@ -20,9 +20,14 @@ main() {
   # printf %.0f : pas de notation 1.2e+09 sur les gros compteurs (mawk), qui casserait le calcul
   rxtx() { awk -v i="$IFACE:" '$1==i {printf "%.0f", $2+$10}' /proc/net/dev; }
 
-  b0=$(rxtx); b0=${b0:-0}
+  # Octets du pull : compteur « internet seulement » du Pi s'il est installé (setup-netcount.sh),
+  # sinon compteur de l'interface (qui inclut aussi le trafic local, donc surévalué).
+  inet() { python3 -c 'import netcount; r = netcount.raw(); print("" if r is None else r)' 2>/dev/null; }
+  b0=$(inet); meter=inet
+  [ -n "$b0" ] || { meter=rxtx; b0=$(rxtx); }
+  b0=${b0:-0}
   update
-  b1=$(rxtx); b1=${b1:-0}
+  b1=$($meter); b1=${b1:-0}
 
   echo "--- $(date '+%F %T') run" >> run.log
   GIT_BYTES=$((b1 - b0)) python3 summary.py "$@" 2>> run.log

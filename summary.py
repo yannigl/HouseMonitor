@@ -18,7 +18,7 @@ import urllib.request
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from common import CFG, count, cycle_line, heartbeat, load_state, log_net
+from common import CFG, count, data_block, heartbeat, load_state, log_net
 
 HA = CFG.get("ha_url", "http://127.0.0.1:8123")
 AUTH = {"Authorization": f"Bearer {CFG['ha_token']}"}
@@ -188,7 +188,7 @@ def send(text):
 
 
 def net_line():
-    return f"\n\n📡 Data 4G : {cycle_line()}"
+    return "\n\n" + data_block()
 
 
 def main():
@@ -214,6 +214,10 @@ def main():
         err = traceback.format_exc()
         print(err, file=sys.stderr)
         heartbeat(ok=False, body=err)  # la trace est lisible dans le Log du check
+        try:
+            log_net("summary", git_bytes)  # la data d'un run en échec compte aussi (pull, Telegram partiel)
+        except Exception:
+            traceback.print_exc()
         sys.exit(3)  # 3 = échec déjà signalé à Healthchecks (run.sh ne le redouble pas)
     heartbeat()
     try:

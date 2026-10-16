@@ -18,6 +18,7 @@ Commandes (depuis le chat configuré uniquement) :
 import http.client
 import json
 import os
+import signal
 import sys
 import time
 import urllib.parse
@@ -26,8 +27,8 @@ from datetime import datetime
 from pathlib import Path
 
 import summary
-from common import (CFG, SERVICES, count, cycle_line, heartbeat, load_state, log_net,
-                    reset_cycle, save_state)
+from common import (CFG, SERVICES, count, data_block, data_compact, heartbeat, load_state, log_net,
+                    pi_cum, reset_cycle, save_state)
 
 TOKEN = CFG["telegram_token"]
 CHAT_ID = str(CFG["telegram_chat_id"])
@@ -88,7 +89,7 @@ class Telegram:
 
 COMMANDS = [
     ("status", "État des services + data 4G"),
-    ("data", "Data 4G utilisée — /data reset : remise à zéro"),
+    ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA par domaine (nom + entity_id)"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
     ("stop", "stop listener|ping|monitor"),
@@ -109,7 +110,7 @@ def status_text(st):
             f"{icon(st['ping'])} ping Healthchecks : {'actif' if st['ping'] else 'arrêté'}"
             f" (toutes les {PING_EVERY // 3600} h, alerte après {ALERT_AFTER} h sans ping)\n"
             f"{icon(st['monitor'])} monitor (résumé du matin) : {'actif' if st['monitor'] else 'arrêté'}\n"
-            f"📡 Data 4G : {cycle_line()}")
+            f"{data_compact()}")
 
 
 def handle(text, st):
@@ -128,11 +129,11 @@ def handle(text, st):
         return HELP
     if cmd == "/data":
         if parts[1:2] == ["reset"]:
-            before = cycle_line()
+            before = data_compact()
             log_net("listener")  # les octets en cours restent dans l'ancien cycle
             reset_cycle()
-            return f"✅ Compteur remis à zéro (était : {before})\n\n📡 Data 4G : {cycle_line()}"
-        return f"📡 Data 4G : {cycle_line()}"
+            return f"✅ Compteur remis à zéro\nAvant : {before}\n\n{data_block()}"
+        return data_block()
     try:
         if cmd == "/list":
             return summary.list_text()
@@ -143,10 +144,10 @@ def handle(text, st):
     return f"❓ Commande inconnue : {text.split()[0] if parts else ''}\n\n" + HELP
 
 
-def main():
+def loop():
     tg = Telegram()
     offset = 0
-    last_ping = last_poll = 0.0
+    last_ping = last_poll = last_sample = 0.0
     last_log_day = datetime.now().day
     mtime = ME.stat().st_mtime
     print("listener démarré", flush=True)
@@ -162,6 +163,10 @@ def main():
             heartbeat()  # ne fait rien si /stop ping
             last_ping = now
 
+        if now - last_sample >= 3600:  # compteur du Pi : une lecture par heure (il repart à 0 au reboot)
+            pi_cum()
+            last_sample = now
+
         if datetime.now().day != last_log_day:  # une ligne de data par jour
             log_net("listener")
             last_log_day = datetime.now().day
@@ -169,6 +174,7 @@ def main():
         if ME.stat().st_mtime != mtime:  # mis à jour par le git pull du matin
             print("code mis à jour, redémarrage", flush=True)
             log_net("listener")
+            pi_cum()
             os.execv(sys.executable, [sys.executable, str(ME)])
 
         if not st["listener"] and now - last_poll < SLOW_POLL:
@@ -193,6 +199,19 @@ def main():
                 continue  # on n'obéit qu'à notre chat
             st = load_state()
             tg.reply(handle(msg["text"], st))
+
+
+def main():
+    # systemd envoie SIGTERM à l'arrêt et au reboot : on enregistre alors la data en cours avant de partir
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    try:
+        loop()
+    finally:
+        try:
+            log_net("listener")
+            pi_cum()
+        except Exception as e:
+            print(f"enregistrement final KO : {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

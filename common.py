@@ -71,31 +71,44 @@ def _next_boundary(start, day):
     return datetime(y, m, min(day, calendar.monthrange(y, m)[1]))
 
 
+def pi_cum():
+    """Cumul des octets internet du Pi (voir netcount.py), None si le compteur n'est pas installé."""
+    try:
+        import netcount
+        return netcount.sample()
+    except Exception:
+        return None
+
+
 def cycle():
-    """(début du cycle, jour d'ancrage). Par défaut : le 1er du mois courant. Avance tout seul."""
+    """(début du cycle, jour d'ancrage, cumul du Pi au début du cycle). Par défaut : le 1er du mois courant.
+    Le cycle avance tout seul d'un mois quand sa date de fin est passée."""
     now = datetime.now()
     try:
         c = json.loads(CYCLE_FILE.read_text())
-        start, day = datetime.fromisoformat(c["start"]), int(c["day"])
+        start, day, base = datetime.fromisoformat(c["start"]), int(c["day"]), c.get("pi_base") or 0
     except (OSError, ValueError, KeyError):
-        start, day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), 1
+        start, day, base = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), 1, 0
     rolled = False
     while now >= _next_boundary(start, day):
         start, rolled = _next_boundary(start, day), True
+    if rolled:
+        base = pi_cum() or base
     if rolled or not CYCLE_FILE.exists():
-        CYCLE_FILE.write_text(json.dumps({"start": start.isoformat(), "day": day}))
-    return start, day
+        CYCLE_FILE.write_text(json.dumps({"start": start.isoformat(), "day": day, "pi_base": base}))
+    return start, day, base
 
 
 def reset_cycle():
     """/data reset : le compteur repart de 0 maintenant, prochain reset le même jour du mois suivant."""
     now = datetime.now()
-    CYCLE_FILE.write_text(json.dumps({"start": now.isoformat(timespec="seconds"), "day": now.day}))
+    CYCLE_FILE.write_text(json.dumps({"start": now.isoformat(timespec="seconds"), "day": now.day,
+                                      "pi_base": pi_cum() or 0}))
 
 
 def cycle_total():
-    """Octets internet du cycle courant : netlog.csv depuis le début du cycle + compteur du process en cours."""
-    start, _ = cycle()
+    """Octets internet du script sur le cycle : netlog.csv depuis le début + compteur du process en cours."""
+    start = cycle()[0]
     since = f"{start:%Y-%m-%d %H:%M:%S}"
     total = NET["sent"] + NET["recv"]
     if NETLOG.exists():
@@ -104,8 +117,40 @@ def cycle_total():
     return total
 
 
-def cycle_line():
-    """Ex. : '312 Ko depuis le 13/10 (remise à zéro auto le 13/11)'."""
-    start, day = cycle()
-    return (f"{cycle_total() / 1024:.0f} Ko depuis le {start:%d/%m} "
-            f"(remise à zéro auto le {_next_boundary(start, day):%d/%m})")
+def fmt_bytes(n):
+    n = float(n)
+    if n < 1024:
+        return f"{n:.0f} o"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.0f} Ko"
+    if n < 1024 ** 3:
+        return f"{n / 1024 ** 2:.1f} Mo".replace(".", ",")
+    return f"{n / 1024 ** 3:.2f} Go".replace(".", ",")
+
+
+def cycle_info():
+    """Chiffres du cycle : début, prochain reset, octets du script, octets du Pi (None si non mesuré)."""
+    start, day, base = cycle()
+    cum = pi_cum()
+    return {"start": start, "next": _next_boundary(start, day), "script": cycle_total(),
+            "pi": None if cum is None else max(0, cum - base)}
+
+
+def data_block():
+    """Bloc affiché par /data et dans le message du matin."""
+    i = cycle_info()
+    lines = [f"📡 Data 4G depuis le {i['start']:%d/%m} (remise à zéro auto le {i['next']:%d/%m})",
+             f"• Script HouseMonitor : {fmt_bytes(i['script'])}"]
+    if i["pi"] is None:
+        lines.append("• Pi au total : non mesuré (sudo ./setup-netcount.sh)")
+    else:
+        lines += [f"• Pi au total : {fmt_bytes(i['pi'])}",
+                  f"• dont HA, système… (hors script) : {fmt_bytes(max(0, i['pi'] - i['script']))}"]
+    return "\n".join(lines)
+
+
+def data_compact():
+    """Une ligne, pour /status et la confirmation de /data reset."""
+    i = cycle_info()
+    pi = "Pi non mesuré" if i["pi"] is None else f"Pi {fmt_bytes(i['pi'])}"
+    return f"📡 Data 4G depuis le {i['start']:%d/%m} : script {fmt_bytes(i['script'])} · {pi}"

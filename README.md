@@ -48,7 +48,7 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 |---|---|
 | `/help` | Liste des commandes (aussi dans le menu « / » de Telegram) |
 | `/status` | État des 3 services + data 4G |
-| `/data` | Data 4G utilisée depuis le dernier reset |
+| `/data` | Data 4G depuis le dernier reset : part du script et total du Pi (voir *Compteur de data du Pi*) |
 | `/data reset` | Remet le compteur à 0 ; remise à zéro automatique le même jour du mois suivant |
 | `/list` | Tous les appareils HA (nom + `entity_id`) groupés par domaine |
 | `/update` | Le résumé du matin, tout de suite |
@@ -143,3 +143,33 @@ maintenant ; il se remet à zéro seul à minuit le même jour du mois suivant (
 renouvellement de votre forfait 4G). Si ce jour n'existe pas (31 → février), c'est le dernier jour du mois.
 `netlog.csv` n'est jamais effacé, seul le point de départ du cycle (`data_cycle.json`) change.
 Ordre de grandeur attendu : ~15 Ko/jour pour le résumé, ~170 Ko/jour pour le listener (réglage par défaut).
+
+### Compteur de data du Pi (internet seulement)
+Les chiffres ci-dessus ne concernent que le script. Pour connaître le total du Pi (Home Assistant, ses
+intégrations cloud comme Arlo, mises à jour système…), installez le compteur, **une seule fois** :
+```bash
+sudo ./setup-netcount.sh
+```
+Il crée des compteurs `nftables` qui ne comptent que les échanges avec des adresses **non locales**,
+donc ce qui passe réellement par le routeur 4G : le trafic local avec vos appareils (Wi-Fi, Zigbee,
+MQTT…) n'est pas compté. Il est relancé à chaque démarrage par systemd, et une règle `sudoers` limitée à la
+seule lecture de ces compteurs permet au listener de les lire sans mot de passe.
+
+`/data` et le message du matin affichent alors :
+```
+📡 Data 4G depuis le 13/10 (remise à zéro auto le 13/11)
+• Script HouseMonitor : 312 Ko
+• Pi au total : 410 Mo
+• dont HA, système… (hors script) : 409,7 Mo
+```
+Sans le compteur, la ligne « Pi au total » indique « non mesuré » ; le reste fonctionne.
+
+À savoir :
+- Les compteurs du noyau repartent à 0 au reboot : le listener les lit toutes les heures et cumule, il ne
+  perd donc au pire que l'heure précédant un arrêt brutal (un arrêt propre ou un `reboot` enregistre tout).
+- Le trafic compté est celui vu par le Pi, en-têtes IP/TCP inclus ; le routeur 4G ajoute un peu de son côté.
+  Pour la référence « forfait », comparez au compteur de votre routeur.
+- L'IPv6 : le préfixe du réseau local est exclu au chargement. Si le préfixe change durablement,
+  relancez `sudo ./setup-netcount.sh` (cela remet les compteurs du noyau à 0, sans effet sur le cumul).
+- Désinstaller : `sudo systemctl disable --now housemonitor-netcount && sudo rm /etc/systemd/system/housemonitor-netcount.service /etc/sudoers.d/housemonitor-netcount /usr/local/sbin/housemonitor-netcount && sudo nft delete table inet housemonitor`
+- Le `git pull` du matin est mesuré avec ce compteur quand il est installé (plus de trafic local mélangé).
