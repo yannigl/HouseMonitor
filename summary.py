@@ -10,7 +10,9 @@ Découvre toutes les entités via /api/states, puis résume selon le type :
 import json
 import os
 import sys
+import time
 import traceback
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -24,6 +26,7 @@ HOURS = CFG.get("hours", 24)
 DOMAINS = CFG.get("domains", ["sensor", "binary_sensor", "switch", "light", "input_boolean"])
 EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
+SEND_RETRY_DELAY = 15  # s entre deux essais d'envoi Telegram (DNS / réseau 4G qui flanche)
 
 
 def http(url, headers=None, data=None):
@@ -166,12 +169,22 @@ def build():
 def send(text):
     # Telegram limite à 4096 caractères par message
     for i in range(0, len(text), 4000):
-        http(
-            f"https://api.telegram.org/bot{CFG['telegram_token']}/sendMessage",
-            data=urllib.parse.urlencode(
-                {"chat_id": CFG["telegram_chat_id"], "text": text[i:i + 4000]}
-            ).encode(),
-        )
+        for attempt in (1, 2, 3):
+            try:
+                http(
+                    f"https://api.telegram.org/bot{CFG['telegram_token']}/sendMessage",
+                    data=urllib.parse.urlencode(
+                        {"chat_id": CFG["telegram_chat_id"], "text": text[i:i + 4000]}
+                    ).encode(),
+                )
+                break
+            except urllib.error.HTTPError as e:  # 4xx = notre faute, inutile de réessayer
+                if e.code < 500 or attempt == 3:
+                    raise
+            except OSError:  # DNS, connexion, timeout
+                if attempt == 3:
+                    raise
+            time.sleep(SEND_RETRY_DELAY)
 
 
 def net_line():
