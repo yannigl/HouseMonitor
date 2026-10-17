@@ -21,6 +21,7 @@
   },
 
   "hours": 24,
+  "hide_unavailable": true,
   "domains": ["sensor", "binary_sensor", "switch", "light", "input_boolean"],
   "exclude": ["sensor.sun_", "binary_sensor.updater", "sensor.time"]
 }

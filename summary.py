@@ -26,6 +26,7 @@ HOURS = CFG.get("hours", 24)
 DOMAINS = CFG.get("domains", ["sensor", "binary_sensor", "switch", "light", "input_boolean"])
 EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
+HIDE_UNAVAILABLE = CFG.get("hide_unavailable", True)  # /list et /update all : masquer les entités indisponibles
 SEND_RETRY_DELAY = 15  # s entre deux essais d'envoi Telegram (DNS / réseau 4G qui flanche)
 
 
@@ -52,11 +53,39 @@ def states():
     return sorted(http(f"{HA}/api/states", AUTH), key=lambda s: s["entity_id"])
 
 
+def is_ghost(s):
+    """Entité fantôme : connue du registre mais son intégration n'est pas chargée (HA la marque `restored`)."""
+    return bool(s.get("attributes", {}).get("restored"))
+
+
+def snapshot():
+    """États à afficher dans /list et /update all, et nombre d'entités masquées.
+
+    Les entités désactivées dans Home Assistant (entité ou intégration) n'existent pas dans son API : elles
+    sont déjà absentes. On écarte en plus les fantômes `restored` et, sauf `hide_unavailable: false`,
+    les entités actuellement indisponibles."""
+    keep, hidden = [], 0
+    for s in states():
+        if is_ghost(s) or (HIDE_UNAVAILABLE and s["state"] == "unavailable"):
+            hidden += 1
+        else:
+            keep.append(s)
+    return keep, hidden
+
+
+def hidden_note(hidden):
+    plural = "s" if hidden > 1 else ""
+    return (f"\nℹ️ {hidden} entité{plural} masquée{plural} (indisponible{plural} ou fantôme{plural} ; "
+            "réglage « hide_unavailable »)") if hidden else ""
+
+
 def discover():
     """Entités à résumer : {entity_id: (nom, unité)}."""
     out = {}
     for s in states():
         eid = s["entity_id"]
+        if is_ghost(s):
+            continue
         dom = eid.split(".")[0]
         if dom not in DOMAINS or any(eid.startswith(p) for p in EXCLUDE):
             continue
@@ -70,28 +99,30 @@ def discover():
 def list_text():
     """/list : tous les appareils, groupés par domaine, avec leur entity_id."""
     by_dom = defaultdict(list)
-    for s in states():
+    keep, hidden = snapshot()
+    for s in keep:
         eid = s["entity_id"]
         name = s.get("attributes", {}).get("friendly_name", eid)
         by_dom[eid.split(".")[0]].append(f"• {name}  ({eid})")
     out = [f"📋 {sum(len(v) for v in by_dom.values())} entités"]
     for dom, lines in sorted(by_dom.items()):
         out.append(f"\n[{dom}] {len(lines)}\n" + "\n".join(lines))
-    return "\n".join(out)
+    return "\n".join(out) + hidden_note(hidden)
 
 
 def all_states_text():
     """/update all : état actuel de toutes les entités, groupé par domaine."""
     by_dom = defaultdict(list)
-    for s in states():
+    keep, hidden = snapshot()
+    for s in keep:
         eid = s["entity_id"]
         a = s.get("attributes", {})
-        val = f"{s['state']}{a.get('unit_of_measurement', '')}"
+        val = s["state"] + ("" if s["state"] in ("unknown", "unavailable") else a.get("unit_of_measurement", ""))
         by_dom[eid.split(".")[0]].append(f"• {a.get('friendly_name', eid)} : {val}  ({ts(s):%d/%m %Hh%M})")
     out = [f"🔄 États au {datetime.now():%d/%m %Hh%M}"]
     for dom, lines in sorted(by_dom.items()):
         out.append(f"\n[{dom}]\n" + "\n".join(lines))
-    return "\n".join(out)
+    return "\n".join(out) + hidden_note(hidden)
 
 
 def history(entity_ids):

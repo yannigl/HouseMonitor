@@ -53,6 +53,12 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 | `/list` | Tous les appareils HA (nom + `entity_id`) groupés par domaine |
 | `/update` | Le résumé du matin, tout de suite |
 | `/update all` | État actuel de **toutes** les entités avec l'heure du dernier changement |
+
+`/list` et `/update all` n'affichent ni les entités **désactivées** dans Home Assistant (entité ou intégration : elles
+n'existent pas dans son API), ni les entités « fantômes » (`restored`, intégration non chargée), ni, par défaut,
+les entités actuellement **indisponibles**. Un pied de page indique combien sont masquées. Pour tout voir :
+`"hide_unavailable": false` dans `config.json` (les fantômes restent masqués). Le résumé du matin n'est pas filtré
+sur l'état actuel : un capteur tombé en panne en cours de journée y figure encore avec ses mesures.
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
 | `/shutdown` (alias `/stop pi`) | Éteint le Pi après confirmation par `/shutdown confirm` (voir *Éteindre le Pi à distance*) |
