@@ -156,6 +156,18 @@ Comportement :
 - run en erreur (HA injoignable, Telegram KO…) → ping `/fail` → **alerte immédiate**.
 - Pi éteint / plus de 4G / listener mort → aucun ping → **alerte après période + grâce** (≤ 4h30).
 
+## Dépannage : DNS (« Could not resolve host », « Temporary failure in name resolution »)
+```bash
+python3 dnscheck.py
+```
+Montre les routes IPv4/IPv6 du Pi, ce que résout le système (5 essais par nom : on voit si les échecs sont
+intermittents) et ce que répond chaque serveur DNS interrogé directement (ceux de `/etc/resolv.conf`, plus
+Cloudflare et Quad9). Si les serveurs publics répondent et pas celui du routeur, le DNS du routeur est en cause.
+
+Le résumé, le listener et les pings résistent mieux qu'un `ping` ou un `git pull` lancés à la main : le listener garde
+une connexion ouverte avec Telegram (aucune résolution tant qu'elle tient), réessaie en boucle, et l'envoi du
+résumé et le `git pull` de `run.sh` font 3 essais. Une panne DNS intermittente passe donc inaperçue côté script.
+
 ## Consommation data (4G)
 Les appels à Home Assistant restent sur `127.0.0.1` : **zéro** trafic internet.
 Seuls le `git pull` et l'envoi Telegram sortent sur la 4G. Chaque exécution ajoute une ligne à `netlog.csv` :
