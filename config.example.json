@@ -12,7 +12,8 @@
   },
 
   "shutdown": {
-    "healthchecks": "fail"
+    "healthchecks": "fail",
+    "dry_run": false
   },
 
   "listener": {

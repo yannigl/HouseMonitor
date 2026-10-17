@@ -110,6 +110,14 @@ Signal envoyé à Healthchecks, réglable dans `config.json` → `shutdown.healt
 | `"log"` | Note « arrêt volontaire » dans le journal du check, **sans alerte** ; si le Pi revient avant période + grâce (5 h), aucune alerte, sinon DOWN | vous ne voulez pas d'alerte pour un arrêt voulu |
 | `"none"` | Rien | — |
 
+Healthchecks n'a pas de signal « arrêt » : ses points d'entrée sont `/start`, `/fail`, `/log` et les codes de sortie.
+`/log` est le plus proche d'un arrêt voulu qui n'est pas un échec.
+
+**Tester sans éteindre** : `"shutdown": {"dry_run": true}` dans `config.json` (puis
+`sudo systemctl restart housemonitor-listener`). `/shutdown` exécute alors toute la chaîne (confirmation, acquittement,
+signal Healthchecks, enregistrement de la data), puis remet le check au vert et répond « 🧪 Simulation : le Pi n'a PAS été
+éteint ». Remettez `false` pour le vrai arrêt.
+
 Mettre le check en *pause* (API Healthchecks, clé d'API requise) n'est pas proposé : un check en pause n'alerte
 plus, donc si le Pi ne redémarre pas après la coupure, personne ne le saurait.
 

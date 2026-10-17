@@ -42,6 +42,7 @@ SLOW_POLL = TG.get("slow_poll_hours", 24) * 3600    # s, mode éco (/stop listen
 PING_EVERY = HC.get("ping_interval_hours", 4) * 3600
 ALERT_AFTER = HC.get("period_hours", 4) + HC.get("grace_hours", 1)
 SHUTDOWN_SIGNAL = CFG.get("shutdown", {}).get("healthchecks", "fail")  # "fail" | "log" | "none"
+SHUTDOWN_DRY_RUN = CFG.get("shutdown", {}).get("dry_run", False)  # True : tout sauf l'extinction
 CONFIRM_WINDOW = 60   # s pour confirmer /shutdown
 SHUTDOWN_DELAY = 5    # s entre l'acquittement et l'extinction
 PENDING = {"t": None}  # demande d'extinction en attente (en mémoire : perdue au reboot, voulu)
@@ -151,6 +152,12 @@ def power_off(tg, offset):
     except Exception as e:
         print(f"enregistrement data KO : {e}", file=sys.stderr)
     time.sleep(SHUTDOWN_DELAY)
+    if SHUTDOWN_DRY_RUN:  # tout a été exécuté sauf l'extinction : on remet le check au vert
+        if signalled:
+            heartbeat()
+        tg.reply("🧪 Simulation (shutdown.dry_run) : le Pi n'a PAS été éteint. Acquittement, signal Healthchecks "
+                 "et enregistrement de la data ont bien été exécutés.")
+        return
     cmd = ["systemctl", "poweroff"] if os.geteuid() == 0 else ["sudo", "-n", "systemctl", "poweroff"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:  # le Pi tourne toujours : on annule l'échec signalé
@@ -180,14 +187,14 @@ def handle(text, st):
             if not can_poweroff():
                 return "❌ Extinction non autorisée : lancez d'abord sudo ./setup-power.sh sur le Pi."
             PENDING["t"] = time.monotonic()
-            return (f"⚠️ Éteindre le Pi ?\n• signal Healthchecks : {shutdown_signal_text(st)}\n"
+            return (f"⚠️ Éteindre le Pi ?{' (SIMULATION : dry_run actif, il ne sera pas éteint)' if SHUTDOWN_DRY_RUN else ''}\n• signal Healthchecks : {shutdown_signal_text(st)}\n"
                     "• il ne redémarrera pas seul : il faudra remettre le courant (ou le débrancher/rebrancher)\n\n"
                     f"Confirmez dans les {CONFIRM_WINDOW} s : /shutdown confirm")
         t = PENDING["t"]
         PENDING["t"] = None
         if t is None or time.monotonic() - t > CONFIRM_WINDOW:
             return "Aucune demande d'extinction en attente (ou expirée). Refaites /shutdown."
-        return (f"⏻ Extinction dans {SHUTDOWN_DELAY} s.\nSignal Healthchecks : {shutdown_signal_text(st)}.\n"
+        return (f"{'🧪 Simulation' if SHUTDOWN_DRY_RUN else '⏻ Extinction'} dans {SHUTDOWN_DELAY} s.\nSignal Healthchecks : {shutdown_signal_text(st)}.\n"
                 "Le Pi redémarrera quand le courant sera remis.", power_off)
     if cmd in ("/stop", "/start") and len(parts) > 1 and parts[1] in SERVICES:
         st[parts[1]] = cmd == "/start"
