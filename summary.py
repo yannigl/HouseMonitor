@@ -73,6 +73,35 @@ def snapshot():
     return keep, hidden
 
 
+def reported_at(s):
+    """Dernière nouvelle de l'entité : `last_reported` (même sans changement de valeur) si HA le fournit."""
+    return datetime.fromisoformat(s.get("last_reported") or s.get("last_updated") or s["last_changed"]).astimezone()
+
+
+def fmt_age(h):
+    return f"{h * 60:.0f} min" if h < 1 else f"{h:.0f} h" if h < 48 else f"{h / 24:.0f} j"
+
+
+def stale_text(hours=24.0):
+    """/stale : entités sans nouvelle depuis au moins `hours` h (appareils absents ou à nettoyer), toutes confondues."""
+    now = datetime.now().astimezone()
+    rows = []
+    for s in states():
+        age = (now - reported_at(s)).total_seconds() / 3600
+        if age >= hours:
+            a = s.get("attributes", {})
+            rows.append((age, f"• {a.get('friendly_name', s['entity_id'])}  ({s['entity_id']}) : {s['state']}, "
+                              f"sans nouvelle depuis {fmt_age(age)}" + (" 👻" if is_ghost(s) else "")))
+    if not rows:
+        return f"✅ Aucune entité sans nouvelle depuis plus de {hours:g} h."
+    out = [f"🕸 {len(rows)} entité{'s' if len(rows) > 1 else ''} sans nouvelle depuis ≥ {hours:g} h"
+           " (👻 = fantôme, intégration non chargée)"]
+    out += [line for _, line in sorted(rows, reverse=True)]
+    out.append("\nPour les retirer : Home Assistant → Réglages → Appareils et services → désactiver l'intégration "
+               "concernée. Un appareil qui n'émet que rarement (porte, bouton) peut figurer ici sans être mort.")
+    return "\n".join(out)
+
+
 def hidden_note(hidden):
     plural = "s" if hidden > 1 else ""
     return (f"\nℹ️ {hidden} entité{plural} masquée{plural} (indisponible{plural} ou fantôme{plural} ; "

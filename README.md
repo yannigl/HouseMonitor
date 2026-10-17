@@ -53,6 +53,7 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 | `/list` | Tous les appareils HA (nom + `entity_id`) groupés par domaine |
 | `/update` | Le résumé du matin, tout de suite |
 | `/update all` | État actuel de **toutes** les entités avec l'heure du dernier changement |
+| `/stale [heures]` | Entités **sans nouvelle depuis N h** (24 par défaut), avec leur âge : le moyen de repérer les appareils d'une ancienne installation |
 
 `/list` et `/update all` n'affichent ni les entités **désactivées** dans Home Assistant (entité ou intégration : elles
 n'existent pas dans son API), ni les entités « fantômes » (`restored`, intégration non chargée), ni, par défaut,
@@ -173,6 +174,14 @@ Cloudflare et Quad9). Si les serveurs publics répondent et pas celui du routeur
 Le résumé, le listener et les pings résistent mieux qu'un `ping` ou un `git pull` lancés à la main : le listener garde
 une connexion ouverte avec Telegram (aucune résolution tant qu'elle tient), réessaie en boucle, et l'envoi du
 résumé et le `git pull` de `run.sh` font 3 essais. Une panne DNS intermittente passe donc inaperçue côté script.
+
+## Dépannage : des appareils d'une ancienne installation apparaissent encore
+Après un déménagement, le résumé du matin peut montrer l'ancienne installation jusqu'à 24 h (il lit l'historique des
+dernières 24 h) ; `/list` et `/update all` montrent l'état actuel, sans fenêtre de temps. Si des appareils restent
+visibles dans `/list`, c'est qu'ils existent encore dans Home Assistant. Envoyez `/stale 24` : vous obtenez la liste
+des entités muettes, avec leur âge, puis désactivez l'intégration correspondante (Réglages → Appareils et services).
+Une entité désactivée dans Home Assistant disparaît de son API, donc du résumé et de `/list`.
+Une valeur figée (MQTT, capteur « template », bouton laissé sur `on`) n'est jamais « indisponible » : seul `/stale` la montre.
 
 ## Consommation data (4G)
 Les appels à Home Assistant restent sur `127.0.0.1` : **zéro** trafic internet.

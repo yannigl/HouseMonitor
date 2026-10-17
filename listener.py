@@ -9,6 +9,7 @@ Commandes (depuis le chat configuré uniquement) :
   /list                        liste des appareils HA (nom + entity_id) par domaine
   /update                      le résumé du matin, maintenant
   /update all                  état actuel de toutes les entités (dernier changement)
+  /stale [heures]              entités sans nouvelle depuis N h (24 par défaut) : les appareils à nettoyer
   Les réponses > 4000 caractères partent en pièce jointe .txt.
   /stop ping   | /start ping   heartbeat Healthchecks
   /stop monitor| /start monitor résumé du matin
@@ -98,6 +99,7 @@ COMMANDS = [
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA par domaine (nom + entity_id)"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
+    ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
     ("shutdown", "Éteindre le Pi (avec confirmation)"),
     ("stop", "stop listener|ping|monitor"),
     ("start", "start listener|ping|monitor"),
@@ -206,6 +208,12 @@ def handle(text, st):
             return f"✅ Compteur remis à zéro\nAvant : {before}\n\n{data_block()}"
         return data_block()
     try:
+        if cmd == "/stale":
+            try:
+                hours = float(parts[1]) if parts[1:2] else 24.0
+            except ValueError:
+                return "Usage : /stale [heures]   (24 par défaut)"
+            return summary.stale_text(hours)
         if cmd == "/list":
             return summary.list_text()
         if cmd == "/update":
