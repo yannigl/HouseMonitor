@@ -15,7 +15,7 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 from common import CFG, count, data_block, heartbeat, load_state, log_net
@@ -125,8 +125,25 @@ def discover():
     return out
 
 
-def list_text():
-    """/list : tous les appareils, groupés par domaine, avec leur entity_id."""
+# L'API REST de HA ne connaît pas les appareils (seulement les entités). Le moteur de templates, lui, fait le lien
+# entité -> appareil : une seule requête locale renvoie, pour chaque entité, son appareil, fabricant, modèle et pièce.
+DEVICE_TEMPLATE = """{% set ns = namespace(rows=[]) %}
+{% for s in states %}
+{% set d = device_id(s.entity_id) %}
+{% set ns.rows = ns.rows + [{'e': s.entity_id, 'd': d, 'n': ((device_attr(d, 'name_by_user') or device_attr(d, 'name')) if d else none), 'm': (device_attr(d, 'manufacturer') if d else none), 'o': (device_attr(d, 'model') if d else none), 'a': area_name(s.entity_id)}] %}
+{% endfor %}
+{{ ns.rows | tojson }}"""
+
+
+def devices_map():
+    """{entity_id: {"d": id appareil ou None, "n": nom, "m": fabricant, "o": modèle, "a": pièce}}."""
+    rows = http(f"{HA}/api/template", {**AUTH, "Content-Type": "application/json"},
+                json.dumps({"template": DEVICE_TEMPLATE}).encode())
+    return {r["e"]: r for r in rows}
+
+
+def list_flat_text():
+    """/list all : toutes les entités, groupées par domaine, avec leur entity_id."""
     by_dom = defaultdict(list)
     keep, hidden = snapshot()
     for s in keep:
@@ -136,6 +153,62 @@ def list_text():
     out = [f"📋 {sum(len(v) for v in by_dom.values())} entités"]
     for dom, lines in sorted(by_dom.items()):
         out.append(f"\n[{dom}] {len(lines)}\n" + "\n".join(lines))
+    return "\n".join(out) + hidden_note(hidden)
+
+
+def list_text(query=None):
+    """/list : les entités regroupées par appareil. /list <mot> : le détail des appareils dont le nom, le fabricant,
+    le modèle, la pièce ou une entité contient <mot>."""
+    keep, hidden = snapshot()
+    try:
+        dmap = devices_map()
+    except Exception as e:  # HA ancien, template refusé... : on retombe sur la liste à plat
+        print(f"regroupement par appareil impossible : {type(e).__name__}: {e}", file=sys.stderr)
+        return list_flat_text() + "\n(regroupement par appareil indisponible, voir run.log)"
+
+    devices, loose = {}, []   # appareil -> entités ; entités sans appareil
+    for s in keep:
+        info = dmap.get(s["entity_id"]) or {}
+        if info.get("d"):
+            devices.setdefault(info["d"], {"info": info, "ents": []})["ents"].append(s)
+        else:
+            loose.append(s)
+    label = lambda i: i.get("n") or "Appareil sans nom"
+    fname = lambda s: s.get("attributes", {}).get("friendly_name", s["entity_id"])
+    dom = lambda s: s["entity_id"].split(".")[0]
+
+    if query:
+        q = query.lower()
+        def match(info, ents):
+            hay = " ".join(str(x or "") for x in (info.get("n"), info.get("m"), info.get("o"), info.get("a")))
+            return q in hay.lower() or any(q in s["entity_id"].lower() or q in fname(s).lower() for s in ents)
+        out = []
+        for dev in sorted(devices.values(), key=lambda d: label(d["info"]).lower()):
+            if match(dev["info"], dev["ents"]):
+                i = dev["info"]
+                maker = " · ".join(x for x in (i.get("m"), i.get("o")) if x)
+                out.append(f"\n■ {label(i)}" + (f" ({maker})" if maker else "") + (f" — {i['a']}" if i.get("a") else ""))
+                out += [f"  • {fname(s)}  ({s['entity_id']})" for s in sorted(dev["ents"], key=lambda s: s["entity_id"])]
+        extra = [s for s in loose if q in s["entity_id"].lower() or q in fname(s).lower()]
+        if extra:
+            out.append("\n■ Sans appareil")
+            out += [f"  • {fname(s)}  ({s['entity_id']})" for s in sorted(extra, key=lambda s: s["entity_id"])]
+        return (f"🔎 « {query} »" + "".join(f"\n{l}" for l in out) if out else f"Aucun appareil ni entité ne correspond à « {query} ».") \
+            + hidden_note(hidden)
+
+    out = [f"📋 {len(devices)} appareil{'s' if len(devices) != 1 else ''} · {len(keep)} entités"
+           + (f" (dont {len(loose)} sans appareil)" if loose else "")]
+    for dev in sorted(devices.values(), key=lambda d: label(d["info"]).lower()):
+        i, ents = dev["info"], dev["ents"]
+        counts = ", ".join(f"{n} {d}" for d, n in sorted(Counter(dom(s) for s in ents).items(), key=lambda kv: -kv[1]))
+        maker = " · ".join(x for x in (i.get("m"), i.get("o")) if x)
+        out.append(f"• {label(i)}" + (f" ({maker})" if maker else "") + f" — {len(ents)} entité{'s' if len(ents) > 1 else ''} : {counts}")
+    if loose:
+        out.append("\nSans appareil (assistants, automatisations, soleil…) :")
+        for d, n in sorted(Counter(dom(s) for s in loose).items(), key=lambda kv: -kv[1]):
+            names = [fname(s) for s in loose if dom(s) == d]
+            out.append(f"• {d} ({n}) : " + ", ".join(names[:6]) + ("…" if len(names) > 6 else ""))
+    out.append("\n/list <mot> : détail d'un appareil · /list all : toutes les entités")
     return "\n".join(out) + hidden_note(hidden)
 
 

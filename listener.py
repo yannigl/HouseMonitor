@@ -6,7 +6,9 @@ Commandes (depuis le chat configuré uniquement) :
   /status                      état des services + data 4G
   /data                        data 4G utilisée depuis le dernier reset
   /data reset                  remet le compteur à 0 (puis reset auto le même jour du mois suivant)
-  /list                        liste des appareils HA (nom + entity_id) par domaine
+  /list                        les appareils HA, avec le nombre et le type de leurs entités
+  /list <mot>                  le détail des appareils (ou entités) dont le nom, la pièce… contient <mot>
+  /list all                    toutes les entités à plat, par domaine (nom + entity_id)
   /update                      le résumé du matin, maintenant
   /update all                  état actuel de toutes les entités (dernier changement)
   /stale [heures]              entités sans nouvelle depuis N h (24 par défaut) : les appareils à nettoyer
@@ -99,7 +101,7 @@ class Telegram:
 COMMANDS = [
     ("status", "État des services + data 4G"),
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
-    ("list", "Appareils HA par domaine (nom + entity_id)"),
+    ("list", "Appareils HA regroupés — /list <mot> : détail, /list all : toutes les entités"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
     ("shutdown", "Éteindre le Pi (avec confirmation)"),
@@ -229,7 +231,9 @@ def handle(text, st):
                 return "Usage : /stale [heures]   (24 par défaut)"
             return summary.stale_text(hours)
         if cmd == "/list":
-            return summary.list_text()
+            if parts[1:2] == ["all"]:
+                return summary.list_flat_text()
+            return summary.list_text(" ".join(parts[1:]) or None)
         if cmd == "/update":
             return summary.all_states_text() if parts[1:2] == ["all"] else summary.build()
     except Exception as e:

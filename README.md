@@ -34,6 +34,11 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 
 `run.sh` fait d'abord un `git pull` (mise à jour automatique du script, 1×/jour), puis lance `summary.py`.
 
+Le regroupement par appareil passe par le moteur de templates de Home Assistant (une requête locale vers
+`/api/template`), car l'API REST ne décrit que les entités. Si cette requête échoue, `/list` retombe sur la liste à plat
+et le précise ; le détail est dans `run.log`. Les entités sans appareil (assistants, automatisations, soleil) sont
+regroupées à part, par domaine.
+
 ## Qui tourne comment
 | Service | Mécanisme | Lancement |
 |---|---|---|
@@ -50,7 +55,9 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 | `/status` | État des 3 services + data 4G |
 | `/data` | Data 4G depuis le dernier reset : part du script et total du Pi (voir *Compteur de data du Pi*) |
 | `/data reset` | Remet le compteur à 0 ; remise à zéro automatique le même jour du mois suivant |
-| `/list` | Tous les appareils HA (nom + `entity_id`) groupés par domaine |
+| `/list` | Les **appareils** Home Assistant, avec le nombre et le type de leurs entités (un appareil expose souvent plusieurs capteurs : batterie, signal…) |
+| `/list <mot>` | Le détail des appareils dont le nom, le fabricant, le modèle, la pièce ou une entité contient `<mot>` (ex. `/list roomba`, `/list salon`) |
+| `/list all` | Toutes les entités à plat, par domaine, avec leur `entity_id` |
 | `/update` | Le résumé du matin, tout de suite |
 | `/update all` | État actuel de **toutes** les entités avec l'heure du dernier changement |
 | `/stale [heures]` | Entités **sans nouvelle depuis N h** (24 par défaut), avec leur âge : le moyen de repérer les appareils d'une ancienne installation |
