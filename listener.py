@@ -143,6 +143,7 @@ def shutdown_signal_text(st):
 def power_off(tg, offset):
     """Exécuté APRÈS l'envoi de l'acquittement."""
     st = load_state()
+    print(f"arrêt : acquittement, signal Healthchecks ({SHUTDOWN_SIGNAL}), dry_run={SHUTDOWN_DRY_RUN}", flush=True)
     # 1. Acquitter la commande chez Telegram : sans cela elle serait relivrée au prochain démarrage.
     try:
         tg.call("getUpdates", offset=offset, timeout=0)
@@ -160,6 +161,7 @@ def power_off(tg, offset):
         pi_cum()
     except Exception as e:
         print(f"enregistrement data KO : {e}", file=sys.stderr)
+    print(f"arrêt : signal envoyé={signalled}, data enregistrée, attente {SHUTDOWN_DELAY} s", flush=True)
     time.sleep(SHUTDOWN_DELAY)
     if SHUTDOWN_DRY_RUN:  # tout a été exécuté sauf l'extinction : on remet le check au vert
         if signalled:
@@ -168,8 +170,10 @@ def power_off(tg, offset):
                  "et enregistrement de la data ont bien été exécutés.")
         return
     cmd = ["systemctl", "poweroff"] if os.geteuid() == 0 else ["sudo", "-n", "systemctl", "poweroff"]
+    print(f"arrêt : exécution de {' '.join(cmd)}", flush=True)
     r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:  # le Pi tourne toujours : on annule l'échec signalé
+    if r.returncode != 0:
+        print(f"arrêt : échec (code {r.returncode}) : {(r.stderr or r.stdout).strip()[:200]}", flush=True)  # le Pi tourne toujours : on annule l'échec signalé
         if signalled:
             heartbeat()
         tg.reply(f"❌ Extinction impossible : {(r.stderr or r.stdout).strip()[:300]}")
@@ -194,6 +198,7 @@ def handle(text, st):
     if cmd == "/shutdown":
         if args[:1] != ["confirm"]:
             if not can_poweroff():
+                print("/shutdown refusé : droit sudo absent (setup-power.sh)", flush=True)
                 return "❌ Extinction non autorisée : lancez d'abord sudo ./setup-power.sh sur le Pi."
             PENDING["t"] = time.monotonic()
             return (f"⚠️ Éteindre le Pi ?{' (SIMULATION : dry_run actif, il ne sera pas éteint)' if SHUTDOWN_DRY_RUN else ''}\n• signal Healthchecks : {shutdown_signal_text(st)}\n"
@@ -294,6 +299,7 @@ def loop():
             if str(msg.get("chat", {}).get("id")) != CHAT_ID or "text" not in msg:
                 continue  # on n'obéit qu'à notre chat
             st = load_state()
+            print(f"commande reçue : {msg['text'][:40]}", flush=True)
             out = handle(msg["text"], st)
             text, after = out if isinstance(out, tuple) else (out, None)
             tg.reply(text)
