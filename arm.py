@@ -115,6 +115,9 @@ def call_service(domain, service, entity_ids):
             msg = json.loads(e.read()).get("message", "")
         except Exception:
             msg = ""
+        if e.code >= 500 and not msg:  # HA n'envoie pas de détail pour une erreur interne
+            msg = ("erreur interne de Home Assistant (l'intégration a échoué) : "
+                   "docker logs --since 5m homeassistant, ou Outils de développement → Actions")
         return f"HTTP {e.code} {msg}".strip()
     except Exception as e:
         return f"{type(e).__name__}: {e}"
