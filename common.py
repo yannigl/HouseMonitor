@@ -7,7 +7,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).parent
-CFG = json.loads((HERE / "config.json").read_text())
+try:
+    CFG = json.loads((HERE / "config.json").read_text())
+except FileNotFoundError:
+    sys.exit("config.json introuvable : cp config.example.json config.json, puis remplissez-le.")
+except json.JSONDecodeError as e:
+    sys.exit(f"config.json invalide : {e.msg}, ligne {e.lineno}, colonne {e.colno}. "
+             "Cause fréquente : une virgule oubliée à la fin de la ligne précédente, ou une virgule en trop "
+             "après le dernier élément d'un bloc. Vérification : python3 -c 'import common; print(\"config OK\")'")
 STATE_FILE = HERE / "state.json"
 CYCLE_FILE = HERE / "data_cycle.json"
 NETLOG = HERE / "netlog.csv"

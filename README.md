@@ -39,6 +39,13 @@ Le regroupement par appareil passe par le moteur de templates de Home Assistant 
 et le précise ; le détail est dans `run.log`. Les entités sans appareil (assistants, automatisations, soleil) sont
 regroupées à part, par domaine.
 
+Après toute modification de `config.json`, vérifiez-le avant de relancer quoi que ce soit :
+```bash
+cd ~/HouseMonitor && python3 -c "import common; print('config OK')"
+```
+Un `config.json` invalide fait échouer le résumé **et** met le listener en boucle de redémarrage (systemd le relance toutes
+les 30 s) : le bot ne répond plus et plus aucun ping n'est envoyé.
+
 ## Qui tourne comment
 | Service | Mécanisme | Lancement |
 |---|---|---|
