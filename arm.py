@@ -1,9 +1,11 @@
 """Armement à distance : /arm <cible> et /unarm <cible> (alias /disarm).
 
-<cible> : all, le nom d'un groupe, ou le nom d'un appareil (ou d'une entité) appartenant à un groupe.
+<cible> : all, le nom d'un groupe, un surnom, ou le nom d'un appareil (ou d'une entité) appartenant à un groupe.
 
 config.json -> "arm": {"groups": {"netatmo": {"prefixes": ["camera.netatmo_"]},
                                   "cameras": {"entities": ["camera.arlo_terrasse"]}, ...}}
+"nicknames": {"living room camera": "camera.living_room_camera", "motion sensor": "input_boolean.motion_sensor_armed"}
+Un surnom désigne une ou plusieurs entités (un entity_id, ou une liste) ; il est cherché avant la recherche par nom.
 Chaque groupe liste des entités (exactes, ou par préfixe d'entity_id). /arm appelle <domaine>.turn_on sur chacune,
 /unarm <domaine>.turn_off. Les groupes sont la liste blanche : un nom d'appareil ne peut viser que des entités qui y
 figurent. Seuls certains domaines sont permis : jamais sirène, lumière, serrure ni volet.
@@ -26,6 +28,16 @@ def norm(s):
 
 def groups():
     return CFG.get("arm", {}).get("groups", {})
+
+
+def nicknames():
+    """{surnom normalisé: (surnom, [entity_id])} d'après config.json -> arm.nicknames."""
+    out = {}
+    for nick, target in CFG.get("arm", {}).get("nicknames", {}).items():
+        ents = [target] if isinstance(target, str) else [t for t in target if isinstance(t, str)] if isinstance(target, list) else []
+        if ents:
+            out[norm(nick)] = (nick, ents)
+    return out
 
 
 def resolve(group, states):
@@ -75,8 +87,10 @@ def find_device(query, states_list, resolved):
         c["ents"].append(eid)
         c["exact"] = c["exact"] or any(q == norm(n) for n in names if n)
     if not cands:
+        nicks = [n for n, _ in nicknames().values()]
         return (f"Aucun appareil des groupes configurés ne correspond à « {query} ». "
-                f"Groupes : {', '.join(groups())}, all. (/arm seul liste les entités.)")
+                f"Groupes : {', '.join(groups())}, all." + (f" Surnoms : {', '.join(nicks)}." if nicks else "")
+                + " (/arm seul liste les entités.)")
     if len(cands) > 1:
         exact = [c for c in cands.values() if c["exact"]]
         if len(exact) != 1:
@@ -112,12 +126,18 @@ def usage():
         return ("Aucun groupe d'armement configuré. Ajoutez un bloc « arm » dans config.json "
                 "(voir « Armement » dans le README), puis relancez le listener.")
     states = {s["entity_id"]: s["state"] for s in summary.states()}
-    lines = ["🛡 /arm all · /arm <groupe> · /arm <nom d'un appareil>", "   /unarm … (mêmes cibles)", "", "Groupes :"]
+    lines = ["🛡 /arm all · /arm <groupe> · /arm <surnom ou nom d'un appareil>", "   /unarm … (mêmes cibles)", "", "Groupes :"]
     for name, g in gs.items():
         ok, problems, _ = resolve(g, states)
         lines.append(f"• {name} : {len(ok)} entité{'s' if len(ok) > 1 else ''}"
                      + (f", {len(problems)} problème{'s' if len(problems) > 1 else ''}" if problems else ""))
         lines += [f"    {e}" for e in ok] + [f"    ⚠️ {p}" for p in problems]
+    nicks = nicknames()
+    if nicks:
+        lines += ["", "Surnoms :"]
+        for nick, ents in nicks.values():
+            ok, problems, _ = resolve({"entities": ents}, states)
+            lines.append(f"• {nick} → {', '.join(ents)}" + ("" if ok else "  ⚠️ " + "; ".join(p.split(' : ', 1)[-1] for p in problems)))
     return "\n".join(lines)
 
 
@@ -131,11 +151,16 @@ def act(arm, which):
     resolved = {name: resolve(g, states) for name, g in gs.items()}
     key = norm(which)
     by_norm = {norm(n): n for n in gs}
+    nicks = nicknames()
     if key == "all":
         selection = [(n, r[0], r[1]) for n, r in resolved.items()]
     elif key in by_norm:
         r = resolved[by_norm[key]]
         selection = [(by_norm[key], r[0], r[1])]
+    elif key in nicks:  # un groupe de même nom l'emporterait ; sinon le surnom, avant la recherche par nom
+        nick, ents = nicks[key]
+        r = resolve({"entities": ents}, states)
+        selection = [(nick, r[0], r[1])]
     else:
         found = find_device(which, states_list, resolved)
         if isinstance(found, str):

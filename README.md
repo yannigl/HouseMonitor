@@ -101,7 +101,7 @@ Le listener se relance tout seul quand le `git pull` du matin modifie `listener.
 `/arm all` met en marche les caméras et détecteurs que **vous** listez dans `config.json`, par groupes ; `/unarm` (alias
 `/disarm`) fait l'inverse. `/arm` seul affiche les groupes et les entités que chacun toucherait, sans rien actionner.
 
-La cible peut être `all`, un **groupe**, ou le **nom d'un appareil** (ou d'une entité) : `/arm caméra jardin`,
+La cible peut être `all`, un **groupe**, un **surnom**, ou le **nom d'un appareil** (ou d'une entité) : `/arm caméra jardin`,
 `/unarm arlo terrasse`. Les accents et la casse sont ignorés. Un nom d'appareil ne peut viser que des entités **déjà
 présentes dans vos groupes** : une prise de chauffage dont le nom contient « salon » n'est jamais touchée par
 `/arm salon`. Si le nom correspond à plusieurs appareils (« salon » → caméra et détecteur), rien n'est actionné et le bot
@@ -121,6 +121,19 @@ Un groupe peut lister des `entities` exactes et/ou des `prefixes` d'`entity_id`.
 
 `/arm` appelle `<domaine>.turn_on` sur chaque entité, `/disarm` `<domaine>.turn_off`. La réponse relit l'état de chaque
 entité 2 s après l'ordre et signale les entités introuvables, indisponibles ou dont le service échoue.
+
+**Surnoms** : un nom court de votre choix pour une ou plusieurs entités, indépendant des noms d'appareils de Home Assistant
+(qui peuvent changer). Il est cherché avant la recherche par nom, sans tenir compte de la casse ni des accents ; un groupe de
+même nom l'emporterait. `/arm all` n'agit que sur les **groupes** : une entité qui n'a qu'un surnom n'est pas armée par `all`.
+```json
+"arm": {
+  "groups": {"cameras":  {"entities": ["camera.living_room_camera"]},
+             "presence": {"entities": ["input_boolean.motion_sensor_armed"]}},
+  "nicknames": {"living room camera": "camera.living_room_camera",
+                "motion sensor": "input_boolean.motion_sensor_armed"}
+}
+```
+Un surnom est soumis aux mêmes garde-fous : une sirène ou une lumière nommée par erreur est refusée.
 
 Garde-fous : seuls les domaines `camera`, `switch`, `input_boolean` et `automation` sont autorisés. Une sirène, une
 lumière, une serrure ou un volet listés par erreur sont refusés et jamais actionnés. Comme pour toutes les commandes, seul
