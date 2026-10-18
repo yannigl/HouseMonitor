@@ -77,8 +77,8 @@ sur l'état actuel : un capteur tombé en panne en cours de journée y figure en
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
 | `/shutdown` (alias `/stop pi`) | Éteint le Pi après confirmation par `/shutdown confirm` (voir *Éteindre le Pi à distance*) |
-| `/arm all` / `/arm <groupe>` | Arme les groupes d'appareils définis dans `config.json` (voir *Armement*) |
-| `/disarm all` / `/disarm <groupe>` | Les désarme |
+| `/arm all` · `/arm <groupe>` · `/arm <appareil>` | Arme les groupes définis dans `config.json`, ou un appareil d'un groupe (voir *Armement*) |
+| `/unarm all` · `/unarm <groupe>` · `/unarm <appareil>` | Les désarme (alias : `/disarm`) |
 | `/stop listener` / `/start listener` | Mode éco (1 appel toutes les `listener.slow_poll_hours`, 24 h) / mode réactif |
 
 Les réponses de plus de 4 000 caractères (limite Telegram) arrivent en pièce jointe `.txt`, en un seul
@@ -98,8 +98,14 @@ journalctl -u housemonitor-listener -f       # logs en direct
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
 
 ### Armement (`/arm`, `/disarm`)
-`/arm all` met en marche les caméras et détecteurs que **vous** listez dans `config.json`, par groupes ; `/disarm` fait
-l'inverse. `/arm` seul affiche les groupes et les entités que chacun toucherait, sans rien actionner.
+`/arm all` met en marche les caméras et détecteurs que **vous** listez dans `config.json`, par groupes ; `/unarm` (alias
+`/disarm`) fait l'inverse. `/arm` seul affiche les groupes et les entités que chacun toucherait, sans rien actionner.
+
+La cible peut être `all`, un **groupe**, ou le **nom d'un appareil** (ou d'une entité) : `/arm caméra jardin`,
+`/unarm arlo terrasse`. Les accents et la casse sont ignorés. Un nom d'appareil ne peut viser que des entités **déjà
+présentes dans vos groupes** : une prise de chauffage dont le nom contient « salon » n'est jamais touchée par
+`/arm salon`. Si le nom correspond à plusieurs appareils (« salon » → caméra et détecteur), rien n'est actionné et le bot
+liste les candidats, sauf si l'un d'eux porte exactement ce nom.
 ```json
 "arm": {
   "groups": {

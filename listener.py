@@ -11,8 +11,8 @@ Commandes (depuis le chat configuré uniquement) :
   /list all                    toutes les entités à plat, par domaine (nom + entity_id)
   /update                      le résumé du matin, maintenant
   /update all                  état actuel de toutes les entités (dernier changement)
-  /arm all | <groupe>          arme (turn_on) les groupes définis dans config.json (caméras, détecteurs)
-  /disarm all | <groupe>       désarme (turn_off) les mêmes groupes
+  /arm all | <groupe> | <appareil>     arme (turn_on) les groupes définis dans config.json, ou un appareil d'un groupe
+  /unarm all | <groupe> | <appareil>   désarme (turn_off), mêmes cibles (alias : /disarm)
   /stale [heures]              entités sans nouvelle depuis N h (24 par défaut) : les appareils à nettoyer
   Les réponses > 4000 caractères partent en pièce jointe .txt.
   /stop ping   | /start ping   heartbeat Healthchecks
@@ -106,8 +106,8 @@ COMMANDS = [
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA regroupés — /list <mot> : détail, /list all : toutes les entités"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
-    ("arm", "Armer les caméras et détecteurs : /arm all ou /arm <groupe>"),
-    ("disarm", "Désarmer : /disarm all ou /disarm <groupe>"),
+    ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
+    ("unarm", "Désarmer : /unarm all, /unarm <groupe> ou /unarm <appareil>"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
     ("shutdown", "Éteindre le Pi (avec confirmation)"),
     ("stop", "stop listener|ping|monitor"),
@@ -234,8 +234,8 @@ def handle(text, st):
             return f"✅ Compteur remis à zéro\nAvant : {before}\n\n{data_block()}"
         return data_block()
     try:
-        if cmd in ("/arm", "/disarm"):
-            return arm.act(cmd == "/arm", parts[1] if parts[1:2] else None)
+        if cmd in ("/arm", "/unarm", "/disarm"):  # /disarm : alias de /unarm
+            return arm.act(cmd == "/arm", " ".join(parts[1:]) or None)
         if cmd == "/stale":
             try:
                 hours = float(parts[1]) if parts[1:2] else 24.0

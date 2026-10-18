@@ -1,13 +1,16 @@
-"""Armement à distance : /arm [all|<groupe>] et /disarm [all|<groupe>].
+"""Armement à distance : /arm <cible> et /unarm <cible> (alias /disarm).
+
+<cible> : all, le nom d'un groupe, ou le nom d'un appareil (ou d'une entité) appartenant à un groupe.
 
 config.json -> "arm": {"groups": {"netatmo": {"prefixes": ["camera.netatmo_"]},
                                   "cameras": {"entities": ["camera.arlo_terrasse"]}, ...}}
 Chaque groupe liste des entités (exactes, ou par préfixe d'entity_id). /arm appelle <domaine>.turn_on sur chacune,
-/disarm <domaine>.turn_off. Seuls certains domaines sont permis : jamais sirène, lumière, serrure ni volet,
-qu'une erreur de configuration ne doit pas pouvoir actionner.
+/unarm <domaine>.turn_off. Les groupes sont la liste blanche : un nom d'appareil ne peut viser que des entités qui y
+figurent. Seuls certains domaines sont permis : jamais sirène, lumière, serrure ni volet.
 """
 import json
 import time
+import unicodedata
 import urllib.error
 
 import summary
@@ -16,12 +19,17 @@ from common import CFG
 ALLOWED = ("camera", "switch", "input_boolean", "automation")
 
 
+def norm(s):
+    """Minuscules sans accents, pour comparer « Caméra Salon » et « camera salon »."""
+    return "".join(c for c in unicodedata.normalize("NFKD", str(s or "")) if not unicodedata.combining(c)).casefold().strip()
+
+
 def groups():
     return CFG.get("arm", {}).get("groups", {})
 
 
 def resolve(group, states):
-    """-> (entités à actionner, problèmes) pour un groupe, d'après les états actuels de HA."""
+    """-> (entités à actionner, problèmes, toutes les entités autorisées du groupe, même indisponibles)."""
     found, problems = [], []
     for eid in group.get("entities", []):
         if eid not in states:
@@ -32,16 +40,53 @@ def resolve(group, states):
     for eid in sorted(states):
         if prefixes and any(eid.startswith(p) for p in prefixes) and eid not in found:
             found.append(eid)
-    ok = []
+    members, ok = [], []
     for eid in found:
         dom = eid.split(".")[0]
         if dom not in ALLOWED:
             problems.append(f"{eid} : domaine « {dom} » non autorisé (permis : {', '.join(ALLOWED)})")
-        elif states[eid] == "unavailable":
+            continue
+        members.append(eid)
+        if states[eid] == "unavailable":
             problems.append(f"{eid} : indisponible")
         else:
             ok.append(eid)
-    return ok, problems
+    return ok, problems, members
+
+
+def find_device(query, states_list, resolved):
+    """Cherche <query> parmi les appareils/entités des groupes (jamais ailleurs).
+    -> (libellé, entités OK, problèmes) ou un message d'erreur (aucun résultat, ou ambigu)."""
+    allowed = sorted({e for _, _, members in resolved.values() for e in members})
+    fnames = {s["entity_id"]: s.get("attributes", {}).get("friendly_name", s["entity_id"]) for s in states_list}
+    states = {s["entity_id"]: s["state"] for s in states_list}
+    try:
+        dmap = summary.devices_map()
+    except Exception:
+        dmap = {}  # sans le registre d'appareils : recherche par nom d'entité seulement
+    q = norm(query)
+    cands = {}  # clé (appareil, ou l'entité seule) -> {"label", "ents", "exact"}
+    for eid in allowed:
+        info = dmap.get(eid) or {}
+        names = [info.get("n"), fnames[eid], eid]
+        if not any(q in norm(n) for n in names if n):
+            continue
+        c = cands.setdefault(info.get("d") or eid, {"label": info.get("n") or fnames[eid], "ents": [], "exact": False})
+        c["ents"].append(eid)
+        c["exact"] = c["exact"] or any(q == norm(n) for n in names if n)
+    if not cands:
+        return (f"Aucun appareil des groupes configurés ne correspond à « {query} ». "
+                f"Groupes : {', '.join(groups())}, all. (/arm seul liste les entités.)")
+    if len(cands) > 1:
+        exact = [c for c in cands.values() if c["exact"]]
+        if len(exact) != 1:
+            names = sorted(c["label"] for c in cands.values())
+            return (f"« {query} » correspond à {len(cands)} appareils : {', '.join(names[:10])}"
+                    f"{'…' if len(names) > 10 else ''}. Précisez le nom, rien n'a été actionné.")
+        cands = {"x": exact[0]}
+    c = next(iter(cands.values()))
+    ok = [e for e in c["ents"] if states[e] != "unavailable"]
+    return c["label"], ok, [f"{e} : indisponible" for e in c["ents"] if states[e] == "unavailable"]
 
 
 def call_service(domain, service, entity_ids):
@@ -67,9 +112,9 @@ def usage():
         return ("Aucun groupe d'armement configuré. Ajoutez un bloc « arm » dans config.json "
                 "(voir « Armement » dans le README), puis relancez le listener.")
     states = {s["entity_id"]: s["state"] for s in summary.states()}
-    lines = ["🛡 Armement : /arm all, /arm <groupe>, /disarm all, /disarm <groupe>", "", "Groupes :"]
+    lines = ["🛡 /arm all · /arm <groupe> · /arm <nom d'un appareil>", "   /unarm … (mêmes cibles)", "", "Groupes :"]
     for name, g in gs.items():
-        ok, problems = resolve(g, states)
+        ok, problems, _ = resolve(g, states)
         lines.append(f"• {name} : {len(ok)} entité{'s' if len(ok) > 1 else ''}"
                      + (f", {len(problems)} problème{'s' if len(problems) > 1 else ''}" if problems else ""))
         lines += [f"    {e}" for e in ok] + [f"    ⚠️ {p}" for p in problems]
@@ -77,35 +122,46 @@ def usage():
 
 
 def act(arm, which):
-    """/arm ou /disarm. `which` : "all", un nom de groupe, ou None (affiche l'aide)."""
+    """/arm ou /unarm. `which` : "all", un groupe, un nom d'appareil, ou None (affiche l'aide)."""
     gs = groups()
     if not which or not gs:
         return usage()
-    which = which.lower()
-    if which != "all" and which not in gs:
-        return f"Groupe inconnu « {which} ». Groupes : {', '.join(gs)}, all"
+    states_list = summary.states()
+    states = {s["entity_id"]: s["state"] for s in states_list}
+    resolved = {name: resolve(g, states) for name, g in gs.items()}
+    key = norm(which)
+    by_norm = {norm(n): n for n in gs}
+    if key == "all":
+        selection = [(n, r[0], r[1]) for n, r in resolved.items()]
+    elif key in by_norm:
+        r = resolved[by_norm[key]]
+        selection = [(by_norm[key], r[0], r[1])]
+    else:
+        found = find_device(which, states_list, resolved)
+        if isinstance(found, str):
+            return found
+        selection = [found]
+
     service = "turn_on" if arm else "turn_off"
-    states = {s["entity_id"]: s["state"] for s in summary.states()}
-    todo, results = {}, []          # entité -> groupe ; lignes de résultat
-    for name in (gs if which == "all" else [which]):
-        ok, problems = resolve(gs[name], states)
+    results = []
+    for label, ok, problems in selection:
         by_dom = {}
         for eid in ok:
             by_dom.setdefault(eid.split(".")[0], []).append(eid)
-        failed = []
+        failed, done = [], []
         for dom, ents in by_dom.items():
             err = call_service(dom, service, ents)
             if err:
                 failed.append(f"{dom}.{service} : {err}")
             else:
-                todo.update({e: name for e in ents})
-        results.append((name, ok, problems, failed))
+                done += ents
+        results.append((label, ok, done, problems, failed))
     time.sleep(2)  # laisser HA et les caméras appliquer le changement avant de relire les états
     after = {s["entity_id"]: s["state"] for s in summary.states()}
     out = [("🛡 Armement" if arm else "🔓 Désarmement") + f" : {which}"]
-    for name, ok, problems, failed in results:
-        out.append(f"\n• {name} ({len(ok)} entité{'s' if len(ok) > 1 else ''})")
-        out += [f"    {e} → {after.get(e, '?')}" for e in ok if e in todo]
+    for label, ok, done, problems, failed in results:
+        out.append(f"\n• {label} ({len(ok)} entité{'s' if len(ok) > 1 else ''})")
+        out += [f"    {e} → {after.get(e, '?')}" for e in done]
         out += [f"    ❌ {f}" for f in failed] + [f"    ⚠️ {p}" for p in problems]
     out.append("\nÉtats relus 2 s après l'ordre. Un appareil qui n'a pas changé d'état peut ne pas gérer ce service.")
     return "\n".join(out)
