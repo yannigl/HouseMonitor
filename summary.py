@@ -97,7 +97,7 @@ def stale_text(hours=24.0):
     out = [f"🕸 {len(rows)} entité{'s' if len(rows) > 1 else ''} sans nouvelle depuis ≥ {hours:g} h"
            " (👻 = fantôme, intégration non chargée)"]
     out += [line for _, line in sorted(rows, reverse=True)]
-    out.append("\nPour les retirer : Home Assistant → Réglages → Appareils et services → désactiver l'intégration "
+    out.append("\nPour les retirer : Home Assistant → Settings → Devices & services → désactiver l'intégration "
                "concernée. Un appareil qui n'émet que rarement (porte, bouton) peut figurer ici sans être mort.")
     return "\n".join(out)
 
@@ -204,7 +204,7 @@ def list_text(query=None):
         maker = " · ".join(x for x in (i.get("m"), i.get("o")) if x)
         out.append(f"• {label(i)}" + (f" ({maker})" if maker else "") + f" — {len(ents)} entité{'s' if len(ents) > 1 else ''} : {counts}")
     if loose:
-        out.append("\nSans appareil (assistants, automatisations, soleil…) :")
+        out.append("\nSans appareil (helpers, automations, soleil…) :")
         for d, n in sorted(Counter(dom(s) for s in loose).items(), key=lambda kv: -kv[1]):
             names = [fname(s) for s in loose if dom(s) == d]
             out.append(f"• {d} ({n}) : " + ", ".join(names[:6]) + ("…" if len(names) > 6 else ""))

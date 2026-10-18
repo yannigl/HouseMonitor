@@ -12,7 +12,7 @@ Commandes (depuis le chat configuré uniquement) :
   /update                      le résumé du matin, maintenant
   /update all                  état actuel de toutes les entités (dernier changement)
   /arm all | <groupe> | <appareil>     arme (turn_on) les groupes définis dans config.json, ou un appareil d'un groupe
-  /unarm all | <groupe> | <appareil>   désarme (turn_off), mêmes cibles (alias : /disarm)
+  /disarm all | <groupe> | <appareil>  désarme (turn_off), mêmes cibles (alias : /unarm)
   /stale [heures]              entités sans nouvelle depuis N h (24 par défaut) : les appareils à nettoyer
   Les réponses > 4000 caractères partent en pièce jointe .txt.
   /stop ping   | /start ping   heartbeat Healthchecks
@@ -107,7 +107,7 @@ COMMANDS = [
     ("list", "Appareils HA regroupés — /list <mot> : détail, /list all : toutes les entités"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
-    ("unarm", "Désarmer : /unarm all, /unarm <groupe> ou /unarm <appareil>"),
+    ("disarm", "Désarmer : /disarm all, /disarm <groupe> ou /disarm <appareil> (alias /unarm)"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
     ("shutdown", "Éteindre le Pi (avec confirmation)"),
     ("stop", "stop listener|ping|monitor"),
@@ -234,7 +234,7 @@ def handle(text, st):
             return f"✅ Compteur remis à zéro\nAvant : {before}\n\n{data_block()}"
         return data_block()
     try:
-        if cmd in ("/arm", "/unarm", "/disarm"):  # /disarm : alias de /unarm
+        if cmd in ("/arm", "/disarm", "/unarm"):  # /unarm : alias de /disarm
             return arm.act(cmd == "/arm", " ".join(parts[1:]) or None)
         if cmd == "/stale":
             try:

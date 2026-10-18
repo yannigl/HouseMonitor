@@ -1,4 +1,4 @@
-"""Armement à distance : /arm <cible> et /unarm <cible> (alias /disarm).
+"""Armement à distance : /arm <cible> et /disarm <cible> (alias /unarm).
 
 <cible> : all, le nom d'un groupe, un surnom, ou le nom d'un appareil (ou d'une entité) appartenant à un groupe.
 
@@ -7,7 +7,7 @@ config.json -> "arm": {"groups": {"netatmo": {"prefixes": ["camera.netatmo_"]},
 "nicknames": {"living room camera": "camera.living_room_camera", "motion sensor": "input_boolean.motion_sensor_armed"}
 Un surnom désigne une ou plusieurs entités (un entity_id, ou une liste) ; il est cherché avant la recherche par nom.
 Chaque groupe liste des entités (exactes, ou par préfixe d'entity_id). /arm appelle <domaine>.turn_on sur chacune,
-/unarm <domaine>.turn_off. Les groupes sont la liste blanche : un nom d'appareil ne peut viser que des entités qui y
+/disarm <domaine>.turn_off. Les groupes sont la liste blanche : un nom d'appareil ne peut viser que des entités qui y
 figurent. Seuls certains domaines sont permis : jamais sirène, lumière, serrure ni volet.
 """
 import json
@@ -103,8 +103,21 @@ def find_device(query, states_list, resolved):
     return c["label"], ok, [f"{e} : indisponible" for e in c["ents"] if states[e] == "unavailable"]
 
 
+RETRY_DELAY = 3  # s avant le 2e essai d'un appel en erreur 5xx ou réseau (turn_on/turn_off sont idempotents)
+
+
 def call_service(domain, service, entity_ids):
-    """Appelle un service HA. Retourne None si OK, sinon le message d'erreur."""
+    """Appelle un service HA, avec un 2e essai si l'erreur est interne (5xx) ou réseau.
+    Retourne None si OK, "(2e essai)" si le 2e essai a réussi, sinon le message d'erreur."""
+    err = _call_once(domain, service, entity_ids)
+    if err and (err.startswith("HTTP 5") or err.startswith(("URLError", "OSError", "TimeoutError", "ConnectionError"))):
+        time.sleep(RETRY_DELAY)
+        err2 = _call_once(domain, service, entity_ids)
+        return "(2e essai)" if err2 is None else err2
+    return err
+
+
+def _call_once(domain, service, entity_ids):
     try:
         summary.http(f"{summary.HA}/api/services/{domain}/{service}",
                      {**summary.AUTH, "Content-Type": "application/json"},
@@ -117,7 +130,7 @@ def call_service(domain, service, entity_ids):
             msg = ""
         if e.code >= 500 and not msg:  # HA n'envoie pas de détail pour une erreur interne
             msg = ("erreur interne de Home Assistant (l'intégration a échoué) : "
-                   "docker logs --since 5m homeassistant, ou Outils de développement → Actions")
+                   "docker logs --since 5m homeassistant, or Developer tools → Actions")
         return f"HTTP {e.code} {msg}".strip()
     except Exception as e:
         return f"{type(e).__name__}: {e}"
@@ -129,7 +142,7 @@ def usage():
         return ("Aucun groupe d'armement configuré. Ajoutez un bloc « arm » dans config.json "
                 "(voir « Armement » dans le README), puis relancez le listener.")
     states = {s["entity_id"]: s["state"] for s in summary.states()}
-    lines = ["🛡 /arm all · /arm <groupe> · /arm <surnom ou nom d'un appareil>", "   /unarm … (mêmes cibles)", "", "Groupes :"]
+    lines = ["🛡 /arm all · /arm <groupe> · /arm <surnom ou nom d'un appareil>", "   /disarm … (mêmes cibles, alias /unarm)", "", "Groupes :"]
     for name, g in gs.items():
         ok, problems, _ = resolve(g, states)
         lines.append(f"• {name} : {len(ok)} entité{'s' if len(ok) > 1 else ''}"
@@ -145,7 +158,7 @@ def usage():
 
 
 def act(arm, which):
-    """/arm ou /unarm. `which` : "all", un groupe, un nom d'appareil, ou None (affiche l'aide)."""
+    """/arm ou /disarm. `which` : "all", un groupe, un nom d'appareil, ou None (affiche l'aide)."""
     gs = groups()
     if not which or not gs:
         return usage()
@@ -176,20 +189,22 @@ def act(arm, which):
         by_dom = {}
         for eid in ok:
             by_dom.setdefault(eid.split(".")[0], []).append(eid)
-        failed, done = [], []
+        failed, done, notes = [], [], []
         for dom, ents in by_dom.items():
             err = call_service(dom, service, ents)
-            if err:
+            if err and err != "(2e essai)":
                 failed.append(f"{dom}.{service} : {err}")
             else:
                 done += ents
-        results.append((label, ok, done, problems, failed))
+                if err:
+                    notes.append(f"{dom}.{service} : réussi au 2e essai (le 1er avait échoué)")
+        results.append((label, ok, done, problems, failed, notes))
     time.sleep(2)  # laisser HA et les caméras appliquer le changement avant de relire les états
     after = {s["entity_id"]: s["state"] for s in summary.states()}
     out = [("🛡 Armement" if arm else "🔓 Désarmement") + f" : {which}"]
-    for label, ok, done, problems, failed in results:
+    for label, ok, done, problems, failed, notes in results:
         out.append(f"\n• {label} ({len(ok)} entité{'s' if len(ok) > 1 else ''})")
         out += [f"    {e} → {after.get(e, '?')}" for e in done]
-        out += [f"    ❌ {f}" for f in failed] + [f"    ⚠️ {p}" for p in problems]
+        out += [f"    ❌ {f}" for f in failed] + [f"    ⚠️ {p}" for p in problems] + [f"    ↻ {n}" for n in notes]
     out.append("\nÉtats relus 2 s après l'ordre. Un appareil qui n'a pas changé d'état peut ne pas gérer ce service.")
     return "\n".join(out)

@@ -36,7 +36,7 @@ Les entités sans activité (0 alerte, 0 cycle) ne sont pas listées pour garder
 
 Le regroupement par appareil passe par le moteur de templates de Home Assistant (une requête locale vers
 `/api/template`), car l'API REST ne décrit que les entités. Si cette requête échoue, `/list` retombe sur la liste à plat
-et le précise ; le détail est dans `run.log`. Les entités sans appareil (assistants, automatisations, soleil) sont
+et le précise ; le détail est dans `run.log`. Les entités sans appareil (helpers, automations, soleil) sont
 regroupées à part, par domaine.
 
 Après toute modification de `config.json`, vérifiez-le avant de relancer quoi que ce soit :
@@ -78,7 +78,7 @@ sur l'état actuel : un capteur tombé en panne en cours de journée y figure en
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
 | `/shutdown` (alias `/stop pi`) | Éteint le Pi après confirmation par `/shutdown confirm` (voir *Éteindre le Pi à distance*) |
 | `/arm all` · `/arm <groupe>` · `/arm <appareil>` | Arme les groupes définis dans `config.json`, ou un appareil d'un groupe (voir *Armement*) |
-| `/unarm all` · `/unarm <groupe>` · `/unarm <appareil>` | Les désarme (alias : `/disarm`) |
+| `/disarm all` · `/disarm <groupe>` · `/disarm <appareil>` | Les désarme (alias : `/unarm`) |
 | `/stop listener` / `/start listener` | Mode éco (1 appel toutes les `listener.slow_poll_hours`, 24 h) / mode réactif |
 
 Les réponses de plus de 4 000 caractères (limite Telegram) arrivent en pièce jointe `.txt`, en un seul
@@ -98,11 +98,12 @@ journalctl -u housemonitor-listener -f       # logs en direct
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
 
 ### Armement (`/arm`, `/disarm`)
-`/arm all` met en marche les caméras et détecteurs que **vous** listez dans `config.json`, par groupes ; `/unarm` (alias
-`/disarm`) fait l'inverse. `/arm` seul affiche les groupes et les entités que chacun toucherait, sans rien actionner.
+(Dans ce README, les menus de Home Assistant sont donnés avec leurs noms anglais.)
+`/arm all` met en marche les caméras et détecteurs que **vous** listez dans `config.json`, par groupes ; `/disarm` (alias
+`/unarm`) fait l'inverse. `/arm` seul affiche les groupes et les entités que chacun toucherait, sans rien actionner.
 
 La cible peut être `all`, un **groupe**, un **surnom**, ou le **nom d'un appareil** (ou d'une entité) : `/arm caméra jardin`,
-`/unarm arlo terrasse`. Les accents et la casse sont ignorés. Un nom d'appareil ne peut viser que des entités **déjà
+`/disarm arlo terrasse`. Les accents et la casse sont ignorés. Un nom d'appareil ne peut viser que des entités **déjà
 présentes dans vos groupes** : une prise de chauffage dont le nom contient « salon » n'est jamais touchée par
 `/arm salon`. Si le nom correspond à plusieurs appareils (« salon » → caméra et détecteur), rien n'est actionné et le bot
 liste les candidats, sauf si l'un d'eux porte exactement ce nom.
@@ -119,7 +120,8 @@ Un groupe peut lister des `entities` exactes et/ou des `prefixes` d'`entity_id`.
 `/list camera`, `/list presence` (le détail des entités d'un appareil). Après modification : valider avec
 `python3 -c "import common; print('config OK')"`, puis `sudo systemctl restart housemonitor-listener`.
 
-`/arm` appelle `<domaine>.turn_on` sur chaque entité, `/disarm` `<domaine>.turn_off`. La réponse relit l'état de chaque
+`/arm` appelle `<domaine>.turn_on` sur chaque entité, `/disarm` `<domaine>.turn_off`. Un appel en erreur interne (HTTP 5xx, par
+exemple un échec passager du cloud d'un fabricant) est retenté une fois après 3 s ; la réponse le signale (« ↻ réussi au 2e essai »). La réponse relit l'état de chaque
 entité 2 s après l'ordre et signale les entités introuvables, indisponibles ou dont le service échoue.
 
 **Surnoms** : un nom court de votre choix pour une ou plusieurs entités, indépendant des noms d'appareils de Home Assistant
@@ -144,7 +146,7 @@ votre `telegram_chat_id` est écouté.
   surveillance. Vérifiez sur un groupe d'essai que l'état relu change bien.
 - Un **détecteur de mouvement** n'est généralement qu'un capteur en lecture seule : Home Assistant ne peut pas le « mettre
   en marche ». Soit son intégration expose un interrupteur ou une automatisation, qu'on met alors dans le groupe, soit on
-  passe par un **assistant** `input_boolean.alarme_armee` que vos automatisations d'alerte testent comme condition, et
+  passe par un **helper** de type Toggle (`input_boolean.motion_sensor_armed`, créé dans Settings → Devices & services → Helpers → Create helper → Toggle) que vos automatisations d'alerte testent comme condition, et
   qu'on met dans le groupe.
 - Les alarmes (`alarm_control_panel`), qui demandent souvent un code, ne sont pas gérées.
 
@@ -262,7 +264,7 @@ résumé et le `git pull` de `run.sh` font 3 essais. Une panne DNS intermittente
 Après un déménagement, le résumé du matin peut montrer l'ancienne installation jusqu'à 24 h (il lit l'historique des
 dernières 24 h) ; `/list` et `/update all` montrent l'état actuel, sans fenêtre de temps. Si des appareils restent
 visibles dans `/list`, c'est qu'ils existent encore dans Home Assistant. Envoyez `/stale 24` : vous obtenez la liste
-des entités muettes, avec leur âge, puis désactivez l'intégration correspondante (Réglages → Appareils et services).
+des entités muettes, avec leur âge, puis désactivez l'intégration correspondante (Settings → Devices & services).
 Une entité désactivée dans Home Assistant disparaît de son API, donc du résumé et de `/list`.
 Une valeur figée (MQTT, capteur « template », bouton laissé sur `on`) n'est jamais « indisponible » : seul `/stale` la montre.
 
