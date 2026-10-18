@@ -168,8 +168,8 @@ def numeric_line(name, unit, states):
     for s in states:
         try:
             pts.append((ts(s), float(s["state"])))
-        except (ValueError, KeyError):
-            pass  # unavailable / unknown
+        except (ValueError, KeyError, TypeError):
+            pass  # unavailable / unknown / état nul (marque de suppression d'une entité dans l'historique)
     if not pts:
         return None
     lo = min(pts, key=lambda p: p[1])
@@ -206,23 +206,33 @@ def build():
     ents = discover()
     hist = history(list(ents))
     sections = defaultdict(list)
+    skipped = []
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
         states = hist.get(eid, [])
         dom = eid.split(".")[0]
-        if dom == "sensor":
-            line = numeric_line(name, unit, states)
-            key = "📈 Capteurs"
-        elif dom == "binary_sensor":
-            line = alert_line(name, states)
-            key = "🚨 Alertes"
-        else:
-            line = switch_line(name, states)
-            key = "🔌 Switchs / lumières"
+        try:  # une entité aux données inattendues ne doit pas faire échouer tout le résumé
+            if dom == "sensor":
+                line = numeric_line(name, unit, states)
+                key = "📈 Capteurs"
+            elif dom == "binary_sensor":
+                line = alert_line(name, states)
+                key = "🚨 Alertes"
+            else:
+                line = switch_line(name, states)
+                key = "🔌 Switchs / lumières"
+        except Exception as e:
+            print(f"entité ignorée {eid} : {type(e).__name__}: {e}", file=sys.stderr)
+            skipped.append(eid)
+            continue
         if line:
             sections[key].append("• " + line)
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
     for key, lines in sections.items():
         text += f"\n\n{key}\n" + "\n".join(lines)
+    if skipped:
+        shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
+        text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
+                 f"{'s' if len(skipped) > 1 else ''} (données illisibles, détail dans run.log) : {shown}")
     return text
 
 

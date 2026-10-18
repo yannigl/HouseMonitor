@@ -45,6 +45,7 @@ SHUTDOWN_SIGNAL = CFG.get("shutdown", {}).get("healthchecks", "fail")  # "fail" 
 SHUTDOWN_DRY_RUN = CFG.get("shutdown", {}).get("dry_run", False)  # True : tout sauf l'extinction
 CONFIRM_WINDOW = 60   # s pour confirmer /shutdown
 SHUTDOWN_DELAY = 5    # s entre l'acquittement et l'extinction
+PING_RETRY = 300  # s avant de retenter un ping Healthchecks qui a échoué (réseau coupé un instant)
 PENDING = {"t": None}  # demande d'extinction en attente (en mémoire : perdue au reboot, voulu)
 ME = Path(__file__)
 
@@ -111,6 +112,12 @@ HELP = "🛠 Commandes\n" + "\n".join(f"/{c} — {d}" for c, d in COMMANDS) + (
     "\n\nlistener : écoute Telegram (stop = mode éco, 1 appel / jour)"
     "\nping : heartbeat Healthchecks (stop = alerte après la grâce)"
     "\nmonitor : résumé du matin (stop = le cron tourne mais n'envoie rien)")
+
+
+def ping_stamp(result, now):
+    """Valeur de `last_ping` après une tentative. Un échec réseau est retenté dans PING_RETRY s : avec une période de
+    4 h et 1 h de grâce, attendre le ping suivant (4 h) transformerait une coupure d'une minute en fausse alerte."""
+    return now - PING_EVERY + PING_RETRY if result is False else now
 
 
 def can_poweroff():
@@ -246,8 +253,7 @@ def loop():
         now = time.time()
 
         if now - last_ping >= PING_EVERY:
-            heartbeat()  # ne fait rien si /stop ping
-            last_ping = now
+            last_ping = ping_stamp(heartbeat(), now)  # ne fait rien si /stop ping
 
         if now - last_sample >= 3600:  # compteur du Pi : une lecture par heure (il repart à 0 au reboot)
             pi_cum()

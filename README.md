@@ -163,6 +163,8 @@ Onglet **Integrations** (menu du haut) :
 Conseil : Email **+** Telegram, deux canaux indépendants pour zéro coût.
 
 ### Qui pinge et quand
+Un ping qui échoue (réseau coupé un instant) est **retenté 5 minutes plus tard**, et non au prochain créneau de 4 h : avec une
+période de 4 h et 1 h de grâce, un seul ping manqué suivi d'une attente de 4 h déclencherait une fausse alerte.
 Le listener pinge toutes les `healthchecks.ping_interval_hours` (4 h, ~6 Ko/ping ≈ 1 Mo/mois),
 et le résumé du matin pinge aussi. Avec période 4 h + grâce 1 h, une panne est signalée en 5 h max.
 
@@ -170,6 +172,12 @@ Comportement :
 - run OK → ping → Healthchecks attend le prochain run.
 - run en erreur (HA injoignable, Telegram KO…) → ping `/fail` → **alerte immédiate**.
 - Pi éteint / plus de 4G / listener mort → aucun ping → **alerte après période + grâce** (≤ 4h30).
+
+## Dépannage : « entité ignorée » dans le résumé
+Si une entité a des données illisibles dans l'historique (par exemple une marque de suppression après avoir retiré puis
+rajouté une intégration), le résumé l'ignore, part quand même, et ajoute en pied de message `⚠️ N entités ignorées : …`.
+Le détail (type d'erreur) est dans `run.log`. Un résumé qui échoue complètement envoie à Healthchecks la trace de
+l'erreur, visible dans l'onglet *Log* du check, sur la ligne du ping en échec.
 
 ## Dépannage : DNS (« Could not resolve host », « Temporary failure in name resolution »)
 ```bash

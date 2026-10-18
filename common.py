@@ -38,9 +38,10 @@ def count(sent=0, recv=0, new_connection=False):
 
 def heartbeat(ok=True, body="", endpoint=None):
     """Ping Healthchecks.io ; /fail déclenche une alerte immédiate, aucun ping -> alerte après la grâce.
-    `body` (erreur, trace) est visible dans l'onglet Log du check, sur la ligne de ce ping."""
+    `body` (erreur, trace) est visible dans l'onglet Log du check, sur la ligne de ce ping.
+    Retourne True (envoyé), False (échec réseau) ou None (ping désactivé ou pas d'URL : rien à faire)."""
     if not HC_URL or not load_state()["ping"]:
-        return False
+        return None
     url = HC_URL.rstrip("/") + endpoint if endpoint else (HC_URL if ok else HC_URL.rstrip("/") + "/fail")
     try:
         req = urllib.request.Request(url, data=body[-2000:].encode(), headers={"User-Agent": "housemonitor"})
