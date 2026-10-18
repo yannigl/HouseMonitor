@@ -21,6 +21,9 @@
     "slow_poll_hours": 24
   },
 
+  "arm": {
+    "groups": {}
+  },
   "hours": 24,
   "hide_unavailable": true,
   "domains": ["sensor", "binary_sensor", "switch", "light", "input_boolean"],

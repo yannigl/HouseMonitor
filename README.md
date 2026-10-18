@@ -77,6 +77,8 @@ sur l'état actuel : un capteur tombé en panne en cours de journée y figure en
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
 | `/shutdown` (alias `/stop pi`) | Éteint le Pi après confirmation par `/shutdown confirm` (voir *Éteindre le Pi à distance*) |
+| `/arm all` / `/arm <groupe>` | Arme les groupes d'appareils définis dans `config.json` (voir *Armement*) |
+| `/disarm all` / `/disarm <groupe>` | Les désarme |
 | `/stop listener` / `/start listener` | Mode éco (1 appel toutes les `listener.slow_poll_hours`, 24 h) / mode réactif |
 
 Les réponses de plus de 4 000 caractères (limite Telegram) arrivent en pièce jointe `.txt`, en un seul
@@ -94,6 +96,38 @@ journalctl -u housemonitor-listener -f       # logs en direct
 ```
 (Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
+
+### Armement (`/arm`, `/disarm`)
+`/arm all` met en marche les caméras et détecteurs que **vous** listez dans `config.json`, par groupes ; `/disarm` fait
+l'inverse. `/arm` seul affiche les groupes et les entités que chacun toucherait, sans rien actionner.
+```json
+"arm": {
+  "groups": {
+    "netatmo":  {"prefixes": ["camera.netatmo_"]},
+    "cameras":  {"entities": ["camera.arlo_terrasse", "camera.arlo_garage"]},
+    "presence": {"entities": ["switch.detecteur_salon", "input_boolean.alarme_armee"]}
+  }
+}
+```
+Un groupe peut lister des `entities` exactes et/ou des `prefixes` d'`entity_id`. Pour trouver les noms : `/list netatmo`,
+`/list camera`, `/list presence` (le détail des entités d'un appareil). Après modification : valider avec
+`python3 -c "import common; print('config OK')"`, puis `sudo systemctl restart housemonitor-listener`.
+
+`/arm` appelle `<domaine>.turn_on` sur chaque entité, `/disarm` `<domaine>.turn_off`. La réponse relit l'état de chaque
+entité 2 s après l'ordre et signale les entités introuvables, indisponibles ou dont le service échoue.
+
+Garde-fous : seuls les domaines `camera`, `switch`, `input_boolean` et `automation` sont autorisés. Une sirène, une
+lumière, une serrure ou un volet listés par erreur sont refusés et jamais actionnés. Comme pour toutes les commandes, seul
+votre `telegram_chat_id` est écouté.
+
+À savoir :
+- Ce que fait `turn_on` dépend de l'intégration : pour une caméra Netatmo, c'est à ma connaissance l'activation de la
+  surveillance. Vérifiez sur un groupe d'essai que l'état relu change bien.
+- Un **détecteur de mouvement** n'est généralement qu'un capteur en lecture seule : Home Assistant ne peut pas le « mettre
+  en marche ». Soit son intégration expose un interrupteur ou une automatisation, qu'on met alors dans le groupe, soit on
+  passe par un **assistant** `input_boolean.alarme_armee` que vos automatisations d'alerte testent comme condition, et
+  qu'on met dans le groupe.
+- Les alarmes (`alarm_control_panel`), qui demandent souvent un code, ne sont pas gérées.
 
 ### Éteindre le Pi à distance (`/shutdown`)
 Pour une coupure de courant prévue. Installation, **une fois** : `sudo ./setup-power.sh` (règle `sudoers`

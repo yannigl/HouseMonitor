@@ -11,6 +11,8 @@ Commandes (depuis le chat configuré uniquement) :
   /list all                    toutes les entités à plat, par domaine (nom + entity_id)
   /update                      le résumé du matin, maintenant
   /update all                  état actuel de toutes les entités (dernier changement)
+  /arm all | <groupe>          arme (turn_on) les groupes définis dans config.json (caméras, détecteurs)
+  /disarm all | <groupe>       désarme (turn_off) les mêmes groupes
   /stale [heures]              entités sans nouvelle depuis N h (24 par défaut) : les appareils à nettoyer
   Les réponses > 4000 caractères partent en pièce jointe .txt.
   /stop ping   | /start ping   heartbeat Healthchecks
@@ -31,6 +33,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+import arm
 import summary
 from common import (CFG, SERVICES, count, data_block, data_compact, heartbeat, load_state, log_net,
                     pi_cum, reset_cycle, save_state)
@@ -103,6 +106,8 @@ COMMANDS = [
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA regroupés — /list <mot> : détail, /list all : toutes les entités"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
+    ("arm", "Armer les caméras et détecteurs : /arm all ou /arm <groupe>"),
+    ("disarm", "Désarmer : /disarm all ou /disarm <groupe>"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
     ("shutdown", "Éteindre le Pi (avec confirmation)"),
     ("stop", "stop listener|ping|monitor"),
@@ -229,6 +234,8 @@ def handle(text, st):
             return f"✅ Compteur remis à zéro\nAvant : {before}\n\n{data_block()}"
         return data_block()
     try:
+        if cmd in ("/arm", "/disarm"):
+            return arm.act(cmd == "/arm", parts[1] if parts[1:2] else None)
         if cmd == "/stale":
             try:
                 hours = float(parts[1]) if parts[1:2] else 24.0
