@@ -204,6 +204,9 @@ seul le message utilise la 4G.
 - `armed_by` : si ce helper est « off » (`/disarm`), aucune alerte n'est envoyée et la 1re alerte du jour n'est pas consommée.
 - États déclencheurs par défaut : `on` (binary_sensor), `recording` (camera) ; pour une entité `event.*`, tout nouvel événement.
   Pour trouver l'état d'une caméra qui détecte un mouvement : HA → Developer tools → States, filtrez sur la caméra.
+- **SMS en plus** : `"sms_service": "notify.sms_moi"` dans le bloc `alerts` envoie aussi la première alerte par SMS, via un
+  service `notify` de HA (par ex. celui du routeur 4G TP-Link, voir ci-dessous). Sans cette clé, pas de SMS ; un échec du SMS
+  n'empêche jamais le message Telegram. Test depuis HA : Developer tools → Actions → `notify.sms_moi`.
 - Un fichier `alerts_state.json` (ignoré par git) retient les appareils déjà alertés aujourd'hui. Redémarrer le listener
   après modification de `config.json` : `sudo systemctl restart housemonitor-listener`.
 

@@ -2,6 +2,7 @@
 
 config.json -> "alerts": {
     "armed_by": "input_boolean.motion_sensor_armed",      # facultatif : pas d'alerte si ce helper est « off » (/disarm)
+    "sms_service": "notify.sms_moi",                        # facultatif : SMS en plus de Telegram (service notify de HA)
     "poll_seconds": 20,                                    # lecture de l'historique HA (local : aucune data 4G)
     "watch": [
       {"entity": "binary_sensor.pir_motion", "name": "PIR"},
@@ -61,6 +62,20 @@ def triggers(w, series, since):
     return None
 
 
+def sms(text):
+    """SMS en plus de Telegram, via un service notify de HA (ex. celui du routeur 4G). Sans effet si « sms_service » est absent.
+    Une erreur d'envoi du SMS ne doit jamais empêcher l'alerte Telegram."""
+    service = CONF.get("sms_service")  # "notify.sms_moi"
+    if not service:
+        return
+    try:
+        dom, name = service.split(".", 1)
+        summary.http(f"{summary.HA}/api/services/{dom}/{name}", {**summary.AUTH, "Content-Type": "application/json"},
+                     json.dumps({"message": text}).encode())
+    except Exception as e:
+        print(f"SMS KO : {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+
+
 def check(since):
     """Une passe : envoie les alertes dues. Retourne le nombre d'alertes envoyées."""
     ws = watches()
@@ -83,7 +98,9 @@ def check(since):
             armed = summary.http(f"{summary.HA}/api/states/{w['armed_by']}", summary.AUTH).get("state")
             if armed != "on":
                 continue  # désarmé : l'alerte n'est pas consommée
-        summary.send(f"🚨 Première alerte du jour — {w['name']} à {t:%Hh%M}")
+        msg = f"🚨 Première alerte du jour — {w['name']} à {t:%Hh%M}"
+        summary.send(msg)
+        sms(msg)
         done["done"].append(w["entity"])
         FILE.write_text(json.dumps(done))
         sent += 1
