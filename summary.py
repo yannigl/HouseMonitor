@@ -355,7 +355,7 @@ def primary_switch(dev_name, switches, fname):
 
 
 def device_lines(ents, hist, dmap, cur):
-    """Une ligne par appareil à interrupteur (prises connectées…) : cycles, statut actuel, énergie sur la fenêtre,
+    """Une ligne par appareil à interrupteur (prises connectées, même inactives) : cycles, statut actuel, énergie totale,
     et la tension seulement si elle est anormale. Puissance, courant et tension normale sont masqués.
     -> (lignes, entités absorbées : l'interrupteur, ses autres interrupteurs et tous ses capteurs)"""
     devs = defaultdict(list)
@@ -374,17 +374,23 @@ def device_lines(ents, hist, dmap, cur):
         sensors = [e for e in members if e.startswith("sensor.")]
         absorbed.update(switches + sensors)
         ev, status = switch_info(hist.get(sw, []), (cur.get(sw) or {}).get("state"))
-        energy = None
+        energy = total = None
         meters = [e for e in sensors if ents[e][1] in UNIT_KWH]
         if meters:
             pick = next((e for e in meters if "total" in norm(fname[e])), meters[0])
             energy = consumed_kwh(hist.get(pick, []), ents[pick][1])
+            try:  # compteur cumulé actuel, converti en kWh
+                total = float((cur.get(pick) or {}).get("state")) * {"Wh": 0.001, "MWh": 1000}.get(ents[pick][1], 1)
+            except (TypeError, ValueError):
+                pass
         warn = next(filter(None, (volt_note(hist.get(e, [])) for e in sensors if ents[e][1] == "V")), None)
-        if not ev and status == "éteint" and not energy and not warn:
-            continue  # rien à dire sur cet appareil
         text = (f"{dev_name} : " + (f"{len(ev)} cycle{'s' if len(ev) > 1 else ''} ({times_text(ev, 'dernier')})"
                                     if ev else "aucun cycle") + f", {status}")
-        if energy is not None:
+        if total is not None:
+            text += f" · énergie totale {fmt_kwh(total)}"
+            if energy is not None:
+                text += f" (+{fmt_kwh(energy)} sur {HOURS} h)"
+        elif energy is not None:
             text += f" · énergie {HOURS} h : {fmt_kwh(energy)}"
         if warn:
             text += f" · {warn}"

@@ -101,7 +101,7 @@ Le listener se relance tout seul quand le `git pull` du matin modifie `listener.
 ### Résumé du matin : les appareils à interrupteur
 Pour chaque appareil qui a un interrupteur (prise connectée…), le résumé tient sur **une ligne** : nombre de cycles et heures,
 statut actuel, énergie consommée sur la fenêtre, par exemple
-`Déshumidificateur entrée : 2 cycles (07h10, 19h40), allumé · énergie 24 h : 1,20 kWh`.
+`Déshumidificateur entrée : 2 cycles (07h10, 19h40), allumé · énergie totale 5,04 kWh (+1,20 kWh sur 24 h)`. Toutes les prises connectées sont listées, même sans cycle (« aucun cycle, éteint »).
 - La puissance, le courant et la tension ne sont **pas** affichés. La tension n'est signalée que si elle sort de la plage
   normale (`⚠️ tension 186–231 V`), réglable : `"summary": {"voltage_range": [200, 250]}`. Les 0 V (prise hors mesure) sont ignorés.
 - L'énergie est la **consommation sur la fenêtre**, calculée d'après le compteur cumulatif (kWh, Wh ou MWh) de l'appareil ;
