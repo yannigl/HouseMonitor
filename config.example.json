@@ -31,6 +31,11 @@
   "arm": {
     "groups": {}
   },
+  "alerts": {
+    "armed_by": "input_boolean.motion_sensor_armed",
+    "poll_seconds": 20,
+    "watch": []
+  },
   "hours": 24,
   "hide_unavailable": true,
   "domains": ["sensor", "binary_sensor", "switch", "light", "input_boolean"],

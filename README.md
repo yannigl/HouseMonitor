@@ -187,6 +187,26 @@ votre `telegram_chat_id` est écouté.
   qu'on met dans le groupe.
 - Les alarmes (`alarm_control_panel`), qui demandent souvent un code, ne sont pas gérées.
 
+### Première alerte du jour (Telegram)
+Le listener surveille les détecteurs et caméras listés dans `alerts.watch` et envoie **un seul** message par appareil et par
+jour : `🚨 Première alerte du jour — PIR à 14h43`. La lecture se fait en local sur HA toutes les 20 s (aucune data 4G),
+seul le message utilise la 4G.
+
+```json
+"alerts": {
+  "armed_by": "input_boolean.motion_sensor_armed",
+  "watch": [
+    {"entity": "binary_sensor.pir_motion", "name": "PIR"},
+    {"entity": "camera.living_room_camera", "name": "Caméra salon", "state": "recording"}
+  ]
+}
+```
+- `armed_by` : si ce helper est « off » (`/disarm`), aucune alerte n'est envoyée et la 1re alerte du jour n'est pas consommée.
+- États déclencheurs par défaut : `on` (binary_sensor), `recording` (camera) ; pour une entité `event.*`, tout nouvel événement.
+  Pour trouver l'état d'une caméra qui détecte un mouvement : HA → Developer tools → States, filtrez sur la caméra.
+- Un fichier `alerts_state.json` (ignoré par git) retient les appareils déjà alertés aujourd'hui. Redémarrer le listener
+  après modification de `config.json` : `sudo systemctl restart housemonitor-listener`.
+
 ### Éteindre le Pi à distance (`/shutdown`)
 Pour une coupure de courant prévue. Installation, **une fois** : `sudo ./setup-power.sh` (règle `sudoers`
 limitée à la seule commande `systemctl poweroff`).

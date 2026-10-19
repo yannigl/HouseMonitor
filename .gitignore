@@ -8,3 +8,4 @@ data_cycle.json
 .run.lock
 netcount_state.json
 .netcount.lock
+alerts_state.json
