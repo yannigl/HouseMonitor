@@ -37,6 +37,7 @@ from pathlib import Path
 import arm
 import control
 import summary
+import vacuum
 from common import (CFG, SERVICES, count, data_block, data_compact, heartbeat, load_state, log_net,
                     pi_cum, reset_cycle, save_state)
 
@@ -110,6 +111,9 @@ COMMANDS = [
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
     ("on", "Allumer un interrupteur : /on <nom de l'appareil>"),
     ("off", "Éteindre un interrupteur : /off <nom de l'appareil>"),
+    ("launch", "Aspirateur : lancer l'aspiration standard — /launch <nom>"),
+    ("send", "Aspirateur : retour à la base — /send <nom> home"),
+    ("pause", "Aspirateur : pause — /pause <nom>"),
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
     ("disarm", "Désarmer : /disarm all, /disarm <groupe> ou /disarm <appareil> (alias /unarm)"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
@@ -240,6 +244,8 @@ def handle(text, st):
     try:
         if cmd in ("/on", "/off"):
             return control.act(cmd == "/on", " ".join(parts[1:]) or None)
+        if cmd in vacuum.ACTIONS:
+            return vacuum.act(cmd, " ".join(parts[1:]) or None)
         if cmd in ("/arm", "/disarm", "/unarm"):  # /unarm : alias de /disarm
             return arm.act(cmd == "/arm", " ".join(parts[1:]) or None)
         if cmd == "/stale":
