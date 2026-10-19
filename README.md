@@ -98,6 +98,11 @@ journalctl -u housemonitor-listener -f       # logs en direct
 (Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
 
+### Résumé du matin : appareils sans interrupteur et batteries
+Les capteurs/alertes d'un appareil sans interrupteur (ex. détecteur PIR) sont regroupés sous « 🏠 Appareils » (`■ nom` puis ses lignes).
+Les batteries (%) au-dessus de 30 % sont masquées ; à 30 % ou moins elles apparaissent avec ⚠️.
+Seuil réglable : `"summary": {"battery_warn": 30}`.
+
 ### Résumé du matin : les appareils à interrupteur
 Pour chaque appareil qui a un interrupteur (prise connectée…), le résumé tient sur **une ligne** : nombre de cycles et heures,
 statut actuel, énergie consommée sur la fenêtre, par exemple

@@ -284,6 +284,17 @@ def on_events(states):
     return [ts(s) for s in states[1:] if s["state"] == "on"]
 
 
+BATTERY_MAX = CFG.get("summary", {}).get("battery_warn", 30)  # % : au-dessus, les batteries ne sont pas affichées
+
+
+def battery_line(name, unit, states):
+    """Batterie : rien si > seuil, sinon un avertissement avec le dernier niveau connu."""
+    v = floats(states)
+    if not v or v[-1] > BATTERY_MAX:
+        return None
+    return f"⚠️ {name} : {v[-1]:g}{unit}"
+
+
 def alert_line(name, states):
     ev = on_events(states)
     if not ev:
@@ -405,37 +416,51 @@ def build():
     hist = history(list(ents))
     sections = defaultdict(list)
     skipped = []
-    dev_lines, absorbed = [], set()
+    dev_lines, absorbed, dmap = [], set(), {}
     try:  # regroupement par appareil : s'il échoue, on retombe sur une ligne par entité
-        dev_lines, absorbed = device_lines(ents, hist, devices_map(), cur)
+        dmap = devices_map()
+        dev_lines, absorbed = device_lines(ents, hist, dmap, cur)
     except Exception as e:
         print(f"regroupement par appareil impossible : {type(e).__name__}: {e}", file=sys.stderr)
+    groups = defaultdict(list)  # appareil sans interrupteur -> ses lignes
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
         if eid in absorbed:
             continue
         series = hist.get(eid, [])
         dom = eid.split(".")[0]
+        info = dmap.get(eid) or {}
+        dname = info.get("n") if info.get("d") else None
+        label = name  # sous un appareil, son nom est retiré du libellé de l'entité
+        if dname and name.lower().startswith(dname.lower()):
+            label = name[len(dname):].strip(" -:") or name
         try:  # une entité aux données inattendues ne doit pas faire échouer tout le résumé
             if dom == "sensor":
-                line = numeric_line(name, unit, series)
+                line = (battery_line if unit == "%" and "batter" in norm(name) else numeric_line)(label, unit, series)
                 key = "📈 Capteurs"
             elif dom == "binary_sensor":
-                line = alert_line(name, series)
+                line = alert_line(label, series)
                 key = "🚨 Alertes"
             else:
-                line = switch_line(name, series)
+                line = switch_line(label, series)
                 key = "🔌 Switchs / lumières"
         except Exception as e:
             print(f"entité ignorée {eid} : {type(e).__name__}: {e}", file=sys.stderr)
             skipped.append(eid)
             continue
         if line:
-            sections[key].append("• " + line)
+            if dname:
+                groups[dname].append("  • " + line)
+            else:
+                sections[key].append("• " + line)
     sections["🔌 Switchs / lumières"] += ["• " + l for l in dev_lines]
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
     for key in ("📈 Capteurs", "🚨 Alertes", "🔌 Switchs / lumières"):  # ordre fixe
         if sections.get(key):
             text += f"\n\n{key}\n" + "\n".join(sorted(sections[key], key=str.lower))
+    if groups:
+        text += "\n\n🏠 Appareils"
+        for dname in sorted(groups, key=str.lower):
+            text += f"\n■ {dname}\n" + "\n".join(sorted(groups[dname], key=str.lower))
     if skipped:
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
