@@ -21,6 +21,13 @@
     "slow_poll_hours": 24
   },
 
+  "summary": {
+    "voltage_range": [200, 250]
+  },
+  "control": {
+    "domains": ["switch"],
+    "exclude": []
+  },
   "arm": {
     "groups": {}
   },

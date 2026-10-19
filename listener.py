@@ -11,6 +11,7 @@ Commandes (depuis le chat configuré uniquement) :
   /list all                    toutes les entités à plat, par domaine (nom + entity_id)
   /update                      le résumé du matin, maintenant
   /update all                  état actuel de toutes les entités (dernier changement)
+  /on <nom> | /off <nom>               allume / éteint l'interrupteur d'un appareil (nom approximatif accepté)
   /arm all | <groupe> | <appareil>     arme (turn_on) les groupes définis dans config.json, ou un appareil d'un groupe
   /disarm all | <groupe> | <appareil>  désarme (turn_off), mêmes cibles (alias : /unarm)
   /stale [heures]              entités sans nouvelle depuis N h (24 par défaut) : les appareils à nettoyer
@@ -34,6 +35,7 @@ from datetime import datetime
 from pathlib import Path
 
 import arm
+import control
 import summary
 from common import (CFG, SERVICES, count, data_block, data_compact, heartbeat, load_state, log_net,
                     pi_cum, reset_cycle, save_state)
@@ -106,6 +108,8 @@ COMMANDS = [
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA regroupés — /list <mot> : détail, /list all : toutes les entités"),
     ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
+    ("on", "Allumer un interrupteur : /on <nom de l'appareil>"),
+    ("off", "Éteindre un interrupteur : /off <nom de l'appareil>"),
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
     ("disarm", "Désarmer : /disarm all, /disarm <groupe> ou /disarm <appareil> (alias /unarm)"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
@@ -234,6 +238,8 @@ def handle(text, st):
             return f"✅ Compteur remis à zéro\nAvant : {before}\n\n{data_block()}"
         return data_block()
     try:
+        if cmd in ("/on", "/off"):
+            return control.act(cmd == "/on", " ".join(parts[1:]) or None)
         if cmd in ("/arm", "/disarm", "/unarm"):  # /unarm : alias de /disarm
             return arm.act(cmd == "/arm", " ".join(parts[1:]) or None)
         if cmd == "/stale":

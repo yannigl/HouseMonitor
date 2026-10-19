@@ -18,7 +18,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-from common import CFG, count, data_block, heartbeat, load_state, log_net
+from common import CFG, count, data_block, heartbeat, load_state, log_net, norm
 
 HA = CFG.get("ha_url", "http://127.0.0.1:8123")
 AUTH = {"Authorization": f"Bearer {CFG['ha_token']}"}
@@ -26,6 +26,8 @@ HOURS = CFG.get("hours", 24)
 DOMAINS = CFG.get("domains", ["sensor", "binary_sensor", "switch", "light", "input_boolean"])
 EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
+VOLT_RANGE = CFG.get("summary", {}).get("voltage_range", [200, 250])  # V : la tension n'est signalée que hors de cette plage
+UNIT_KWH = {"kWh": 1.0, "Wh": 0.001, "MWh": 1000.0}
 HIDE_UNAVAILABLE = CFG.get("hide_unavailable", True)  # /list et /update all : masquer les entités indisponibles
 SEND_RETRY_DELAY = 15  # s entre deux essais d'envoi Telegram (DNS / réseau 4G qui flanche)
 
@@ -108,10 +110,10 @@ def hidden_note(hidden):
             "réglage « hide_unavailable »)") if hidden else ""
 
 
-def discover():
+def discover(sts=None):
     """Entités à résumer : {entity_id: (nom, unité)}."""
     out = {}
-    for s in states():
+    for s in (states() if sts is None else sts):
         eid = s["entity_id"]
         if is_ghost(s):
             continue
@@ -213,15 +215,39 @@ def list_text(query=None):
 
 
 def all_states_text():
-    """/update all : état actuel de toutes les entités, groupé par domaine."""
-    by_dom = defaultdict(list)
+    """/update all : état actuel de toutes les entités, regroupées par appareil (puis par domaine pour celles sans appareil)."""
     keep, hidden = snapshot()
+    try:
+        dmap = devices_map()
+    except Exception as e:  # sans registre d'appareils : tout est « sans appareil », groupé par domaine
+        print(f"regroupement par appareil impossible : {type(e).__name__}: {e}", file=sys.stderr)
+        dmap = {}
+    devices, loose = {}, []
     for s in keep:
-        eid = s["entity_id"]
+        info = dmap.get(s["entity_id"]) or {}
+        if info.get("d"):
+            devices.setdefault(info["d"], {"info": info, "ents": []})["ents"].append(s)
+        else:
+            loose.append(s)
+
+    def value(s):
         a = s.get("attributes", {})
-        val = s["state"] + ("" if s["state"] in ("unknown", "unavailable") else a.get("unit_of_measurement", ""))
-        by_dom[eid.split(".")[0]].append(f"• {a.get('friendly_name', eid)} : {val}  ({ts(s):%d/%m %Hh%M})")
+        return s["state"] + ("" if s["state"] in ("unknown", "unavailable") else a.get("unit_of_measurement", ""))
+
     out = [f"🔄 États au {datetime.now():%d/%m %Hh%M}"]
+    for dev in sorted(devices.values(), key=lambda d: (d["info"].get("n") or "").lower()):
+        i = dev["info"]
+        name = i.get("n") or "Appareil sans nom"
+        maker = " · ".join(x for x in (i.get("m"), i.get("o")) if x)
+        out.append(f"\n■ {name}" + (f" ({maker})" if maker else "") + (f" — {i['a']}" if i.get("a") else ""))
+        for s in sorted(dev["ents"], key=lambda s: s["entity_id"]):
+            fn = s.get("attributes", {}).get("friendly_name", s["entity_id"])
+            label = fn[len(name):].strip(" -:") or fn if fn.lower().startswith(name.lower()) else fn
+            out.append(f"  • {label} : {value(s)}  ({ts(s):%d/%m %Hh%M})")
+    by_dom = defaultdict(list)
+    for s in loose:
+        by_dom[s["entity_id"].split(".")[0]].append(
+            f"• {s.get('attributes', {}).get('friendly_name', s['entity_id'])} : {value(s)}  ({ts(s):%d/%m %Hh%M})")
     for dom, lines in sorted(by_dom.items()):
         out.append(f"\n[{dom}]\n" + "\n".join(lines))
     return "\n".join(out) + hidden_note(hidden)
@@ -266,32 +292,132 @@ def alert_line(name, states):
     return f"{name} : {len(ev)} alerte{'s' if len(ev) > 1 else ''} ({times})"
 
 
-def switch_line(name, states):
+def switch_info(states, current=None):
+    """(heures des passages à 'on', statut actuel en français). `current` : état actuel lu directement dans HA."""
     ev = on_events(states)
-    cur = "allumé" if states and states[-1]["state"] == "on" else "éteint"
+    state = current if current is not None else (states[-1]["state"] if states else "off")
+    return ev, ("indisponible" if state == "unavailable" else "allumé" if state == "on" else "éteint")
+
+
+def times_text(ev, last_word):
+    return ", ".join(hm(t) for t in ev) if len(ev) <= MAX_TIMES else f"{last_word} {hm(ev[-1])}"
+
+
+def switch_line(name, states):
+    ev, cur = switch_info(states)
     if not ev:
         return None if cur == "éteint" else f"{name} : {cur}, aucun cycle"
-    times = ", ".join(hm(t) for t in ev) if len(ev) <= MAX_TIMES else f"dernier {hm(ev[-1])}"
-    return f"{name} : {len(ev)} cycle{'s' if len(ev) > 1 else ''} ({times}), {cur}"
+    return f"{name} : {len(ev)} cycle{'s' if len(ev) > 1 else ''} ({times_text(ev, 'dernier')}), {cur}"
+
+
+def floats(states):
+    out = []
+    for s in states:
+        try:
+            out.append(float(s["state"]))
+        except (ValueError, KeyError, TypeError):
+            pass  # unavailable / unknown / état nul
+    return out
+
+
+def consumed_kwh(states, unit):
+    """Énergie consommée sur la fenêtre (kWh) d'après un compteur cumulatif ; une baisse = remise à zéro du compteur."""
+    f = UNIT_KWH.get(unit)
+    v = floats(states)
+    if f is None or not v:
+        return None
+    return sum((b - a) if b >= a else b for a, b in zip(v, v[1:])) * f
+
+
+def fmt_kwh(x):
+    return "0 kWh" if x < 0.005 else f"{x:.2f}".replace(".", ",") + " kWh"
+
+
+def volt_note(states):
+    """Signale la tension seulement si elle sort de la plage normale (les 0 V d'une prise hors mesure sont ignorés)."""
+    v = [x for x in floats(states) if x > 0]
+    lo, hi = VOLT_RANGE
+    if v and (min(v) < lo or max(v) > hi):
+        return f"⚠️ tension {min(v):.0f}–{max(v):.0f} V (plage normale {lo:g}–{hi:g} V)"
+    return None
+
+
+def primary_switch(dev_name, switches, fname):
+    """L'interrupteur principal d'un appareil : celui qui porte le nom de l'appareil, sinon celui dont l'entity_id
+    est le plus court (les autres ajoutent un suffixe : child_lock, backlight, indicator…)."""
+    if len(switches) == 1:
+        return switches[0]
+    dn = norm(dev_name)
+    for e in switches:
+        if norm(fname[e]) in (dn, dn + " switch", dn + " interrupteur"):
+            return e
+    return min(switches, key=lambda e: (len(e), e))
+
+
+def device_lines(ents, hist, dmap, cur):
+    """Une ligne par appareil à interrupteur (prises connectées…) : cycles, statut actuel, énergie sur la fenêtre,
+    et la tension seulement si elle est anormale. Puissance, courant et tension normale sont masqués.
+    -> (lignes, entités absorbées : l'interrupteur, ses autres interrupteurs et tous ses capteurs)"""
+    devs = defaultdict(list)
+    for eid in ents:
+        d = (dmap.get(eid) or {}).get("d")
+        if d:
+            devs[d].append(eid)
+    lines, absorbed = [], set()
+    for members in devs.values():
+        switches = sorted(e for e in members if e.startswith("switch."))
+        if not switches:
+            continue
+        fname = {e: ents[e][0] for e in members}
+        dev_name = dmap[switches[0]].get("n") or fname[switches[0]]
+        sw = primary_switch(dev_name, switches, fname)
+        sensors = [e for e in members if e.startswith("sensor.")]
+        absorbed.update(switches + sensors)
+        ev, status = switch_info(hist.get(sw, []), (cur.get(sw) or {}).get("state"))
+        energy = None
+        meters = [e for e in sensors if ents[e][1] in UNIT_KWH]
+        if meters:
+            pick = next((e for e in meters if "total" in norm(fname[e])), meters[0])
+            energy = consumed_kwh(hist.get(pick, []), ents[pick][1])
+        warn = next(filter(None, (volt_note(hist.get(e, [])) for e in sensors if ents[e][1] == "V")), None)
+        if not ev and status == "éteint" and not energy and not warn:
+            continue  # rien à dire sur cet appareil
+        text = (f"{dev_name} : " + (f"{len(ev)} cycle{'s' if len(ev) > 1 else ''} ({times_text(ev, 'dernier')})"
+                                    if ev else "aucun cycle") + f", {status}")
+        if energy is not None:
+            text += f" · énergie {HOURS} h : {fmt_kwh(energy)}"
+        if warn:
+            text += f" · {warn}"
+        lines.append(text)
+    return sorted(lines, key=str.lower), absorbed
 
 
 def build():
-    ents = discover()
+    sts = states()
+    cur = {s["entity_id"]: s for s in sts}
+    ents = discover(sts)
     hist = history(list(ents))
     sections = defaultdict(list)
     skipped = []
+    dev_lines, absorbed = [], set()
+    try:  # regroupement par appareil : s'il échoue, on retombe sur une ligne par entité
+        dev_lines, absorbed = device_lines(ents, hist, devices_map(), cur)
+    except Exception as e:
+        print(f"regroupement par appareil impossible : {type(e).__name__}: {e}", file=sys.stderr)
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
-        states = hist.get(eid, [])
+        if eid in absorbed:
+            continue
+        series = hist.get(eid, [])
         dom = eid.split(".")[0]
         try:  # une entité aux données inattendues ne doit pas faire échouer tout le résumé
             if dom == "sensor":
-                line = numeric_line(name, unit, states)
+                line = numeric_line(name, unit, series)
                 key = "📈 Capteurs"
             elif dom == "binary_sensor":
-                line = alert_line(name, states)
+                line = alert_line(name, series)
                 key = "🚨 Alertes"
             else:
-                line = switch_line(name, states)
+                line = switch_line(name, series)
                 key = "🔌 Switchs / lumières"
         except Exception as e:
             print(f"entité ignorée {eid} : {type(e).__name__}: {e}", file=sys.stderr)
@@ -299,9 +425,11 @@ def build():
             continue
         if line:
             sections[key].append("• " + line)
+    sections["🔌 Switchs / lumières"] += ["• " + l for l in dev_lines]
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
-    for key, lines in sections.items():
-        text += f"\n\n{key}\n" + "\n".join(lines)
+    for key in ("📈 Capteurs", "🚨 Alertes", "🔌 Switchs / lumières"):  # ordre fixe
+        if sections.get(key):
+            text += f"\n\n{key}\n" + "\n".join(sorted(sections[key], key=str.lower))
     if skipped:
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"

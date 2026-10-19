@@ -66,7 +66,8 @@ les 30 s) : le bot ne répond plus et plus aucun ping n'est envoyé.
 | `/list <mot>` | Le détail des appareils dont le nom, le fabricant, le modèle, la pièce ou une entité contient `<mot>` (ex. `/list roomba`, `/list salon`) |
 | `/list all` | Toutes les entités à plat, par domaine, avec leur `entity_id` |
 | `/update` | Le résumé du matin, tout de suite |
-| `/update all` | État actuel de **toutes** les entités avec l'heure du dernier changement |
+| `/update all` | État actuel de **toutes** les entités, **regroupées par appareil** (les capteurs d'une prise sous son interrupteur), avec l'heure du dernier changement |
+| `/on <nom>` · `/off <nom>` | Allume / éteint l'interrupteur d'un appareil (voir *Piloter un interrupteur*) |
 | `/stale [heures]` | Entités **sans nouvelle depuis N h** (24 par défaut), avec leur âge : le moyen de repérer les appareils d'une ancienne installation |
 
 `/list` et `/update all` n'affichent ni les entités **désactivées** dans Home Assistant (entité ou intégration : elles
@@ -96,6 +97,37 @@ journalctl -u housemonitor-listener -f       # logs en direct
 ```
 (Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
+
+### Résumé du matin : les appareils à interrupteur
+Pour chaque appareil qui a un interrupteur (prise connectée…), le résumé tient sur **une ligne** : nombre de cycles et heures,
+statut actuel, énergie consommée sur la fenêtre, par exemple
+`Déshumidificateur entrée : 2 cycles (07h10, 19h40), allumé · énergie 24 h : 1,20 kWh`.
+- La puissance, le courant et la tension ne sont **pas** affichés. La tension n'est signalée que si elle sort de la plage
+  normale (`⚠️ tension 186–231 V`), réglable : `"summary": {"voltage_range": [200, 250]}`. Les 0 V (prise hors mesure) sont ignorés.
+- L'énergie est la **consommation sur la fenêtre**, calculée d'après le compteur cumulatif (kWh, Wh ou MWh) de l'appareil ;
+  une baisse du compteur est comptée comme une remise à zéro.
+- Un appareil sans activité (jamais allumé, éteint, 0 énergie, tension normale) n'apparaît pas.
+- Ses autres interrupteurs (verrou enfant, rétro-éclairage) et tous ses capteurs sont absorbés dans cette ligne ; les
+  capteurs de mouvement (`binary_sensor`) restent dans « Alertes ».
+- L'interrupteur principal est celui qui porte le nom de l'appareil, sinon celui dont l'`entity_id` est le plus court.
+`/update all` garde **tout**, regroupé par appareil. Si le regroupement échoue, le résumé retombe sur une ligne par entité.
+
+### Piloter un interrupteur (`/on`, `/off`)
+`/on déshumidificateur entrée` allume l'interrupteur de l'appareil, `/off …` l'éteint. Le nom est cherché dans le nom de
+l'appareil, de l'entité et son `entity_id`, sans casse ni accents, mots dans n'importe quel ordre. S'il désigne plusieurs
+appareils (« déshumidificateur » → entrée et garage), rien n'est actionné et le bot liste les candidats, sauf si l'un porte
+exactement ce nom. `/on` seul liste les appareils pilotables.
+- Seul l'**interrupteur principal** est actionné ; les autres interrupteurs de l'appareil sont signalés « non touchés ».
+- La réponse relit l'état 2 s après l'ordre ; une erreur interne de Home Assistant est retentée une fois.
+```json
+"control": {
+  "domains": ["switch"],
+  "exclude": ["switch.prise_routeur", "switch.congelateur"]
+}
+```
+`domains` : types pilotables (`switch` par défaut ; permis : `switch`, `light`, `input_boolean`, `fan`). `exclude` : `entity_id`
+exacts ou préfixes à **ne jamais** piloter. Mettez-y tout ce dont l'arrêt à distance serait gênant : la prise du routeur ou
+du Pi, du congélateur… Comme pour toute commande, seul votre `telegram_chat_id` est écouté.
 
 ### Armement (`/arm`, `/disarm`)
 (Dans ce README, les menus de Home Assistant sont donnés avec leurs noms anglais.)

@@ -12,18 +12,12 @@ figurent. Seuls certains domaines sont permis : jamais sirène, lumière, serrur
 """
 import json
 import time
-import unicodedata
 import urllib.error
 
 import summary
-from common import CFG
+from common import CFG, norm
 
 ALLOWED = ("camera", "switch", "input_boolean", "automation")
-
-
-def norm(s):
-    """Minuscules sans accents, pour comparer « Caméra Salon » et « camera salon »."""
-    return "".join(c for c in unicodedata.normalize("NFKD", str(s or "")) if not unicodedata.combining(c)).casefold().strip()
 
 
 def groups():

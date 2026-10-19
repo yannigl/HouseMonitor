@@ -2,6 +2,7 @@
 import calendar
 import json
 import sys
+import unicodedata
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,11 @@ TLS_OVERHEAD = 6000  # ~octets d'un handshake TLS (estimation, invisible depuis 
 NET = {"sent": 0, "recv": 0}  # octets internet du processus courant (HA est en local)
 
 SERVICES = ("listener", "ping", "monitor")
+
+
+def norm(s):
+    """Minuscules sans accents, pour comparer « Déshumidificateur Entrée » et « deshumidificateur entree »."""
+    return "".join(c for c in unicodedata.normalize("NFKD", str(s or "")) if not unicodedata.combining(c)).casefold().strip()
 
 
 def load_state():
