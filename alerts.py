@@ -20,6 +20,7 @@ import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
+import routersms
 import summary
 from common import CFG, HERE
 
@@ -63,12 +64,19 @@ def triggers(w, series, since):
 
 
 def sms(text):
-    """SMS en plus de Telegram, via un service notify de HA (ex. celui du routeur 4G). Sans effet si « sms_service » est absent.
+    """SMS en plus de Telegram. Deux voies, la première configurée l'emporte :
+    - "sms" dans config.json : envoi direct par le routeur 4G TP-Link (routersms.py) ;
+    - "alerts.sms_service" : un service notify de HA (ex. « notify.sms_moi »).
     Une erreur d'envoi du SMS ne doit jamais empêcher l'alerte Telegram."""
-    service = CONF.get("sms_service")  # "notify.sms_moi"
-    if not service:
-        return
     try:
+        if CFG.get("sms"):
+            ok, detail = routersms.send(text)
+            if not ok:
+                print(f"SMS KO : {detail}", file=sys.stderr, flush=True)
+            return
+        service = CONF.get("sms_service")
+        if not service:
+            return
         dom, name = service.split(".", 1)
         summary.http(f"{summary.HA}/api/services/{dom}/{name}", {**summary.AUTH, "Content-Type": "application/json"},
                      json.dumps({"message": text}).encode())

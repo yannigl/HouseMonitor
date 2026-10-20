@@ -207,6 +207,11 @@ seul le message utilise la 4G.
 - **SMS en plus** : `"sms_service": "notify.sms_moi"` dans le bloc `alerts` envoie aussi la première alerte par SMS, via un
   service `notify` de HA (par ex. celui du routeur 4G TP-Link, voir ci-dessous). Sans cette clé, pas de SMS ; un échec du SMS
   n'empêche jamais le message Telegram. Test depuis HA : Developer tools → Actions → `notify.sms_moi`.
+- **SMS par le routeur 4G TP-Link TL-MR6400** (firmware 1.0.x, sans HA) : bloc `"sms": {"host", "user", "password", "to",
+  "max_per_day"}` dans `config.json` (le mot de passe du routeur reste dans ce fichier, jamais dans git). Test : `python3 routersms.py "texte"`.
+  Le protocole vient de l'interface web du routeur (pas de documentation officielle). Se connecter déconnecte l'interface web
+  du routeur (un seul administrateur à la fois) ; après un échec de connexion plus aucune tentative pendant 1 h (le routeur
+  bloque 2 h après 10 échecs) ; 5 SMS par jour au maximum. Les SMS sont facturés selon votre forfait.
 - Un fichier `alerts_state.json` (ignoré par git) retient les appareils déjà alertés aujourd'hui. Redémarrer le listener
   après modification de `config.json` : `sudo systemctl restart housemonitor-listener`.
 

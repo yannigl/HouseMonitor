@@ -9,3 +9,4 @@ data_cycle.json
 netcount_state.json
 .netcount.lock
 alerts_state.json
+sms_state.json
