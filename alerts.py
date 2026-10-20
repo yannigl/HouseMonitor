@@ -41,6 +41,21 @@ def watches():
     return out
 
 
+LOCK = threading.Lock()  # le thread de surveillance et /rearm écrivent le même fichier
+
+
+def rearm():
+    """/rearm : remet la journée à zéro, la prochaine alerte de chaque appareil sera envoyée (Telegram et SMS).
+    Retourne le texte de réponse."""
+    with LOCK:
+        done = load_done()
+        n = len(done["done"])
+        FILE.write_text(json.dumps({"day": done["day"], "done": []}))
+    names = ", ".join(w["name"] for w in watches()) or "aucun appareil configuré (alerts.watch)"
+    return (f"🔔 Alertes réarmées : la prochaine alerte de chaque appareil sera envoyée.\n"
+            f"Surveillés : {names}\nDéjà alertés aujourd'hui avant /rearm : {n}")
+
+
 def load_done():
     today = datetime.now().strftime("%Y-%m-%d")
     try:
@@ -109,8 +124,10 @@ def check(since):
         msg = f"🚨 Première alerte du jour — {w['name']} à {t:%Hh%M}"
         summary.send(msg)
         sms(msg)
-        done["done"].append(w["entity"])
-        FILE.write_text(json.dumps(done))
+        with LOCK:
+            done = load_done()
+            done["done"].append(w["entity"])
+            FILE.write_text(json.dumps(done))
         sent += 1
     return sent
 

@@ -115,6 +115,7 @@ COMMANDS = [
     ("launch", "Aspirateur : lancer l'aspiration standard — /launch <nom>"),
     ("send", "Aspirateur : retour à la base — /send <nom> home"),
     ("pause", "Aspirateur : pause — /pause <nom>"),
+    ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
     ("disarm", "Désarmer : /disarm all, /disarm <groupe> ou /disarm <appareil> (alias /unarm)"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
@@ -245,6 +246,8 @@ def handle(text, st):
     try:
         if cmd in ("/on", "/off"):
             return control.act(cmd == "/on", " ".join(parts[1:]) or None)
+        if cmd == "/rearm":
+            return alerts.rearm()
         if cmd in vacuum.ACTIONS:
             return vacuum.act(cmd, " ".join(parts[1:]) or None)
         if cmd in ("/arm", "/disarm", "/unarm"):  # /unarm : alias de /disarm

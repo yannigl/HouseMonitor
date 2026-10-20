@@ -212,6 +212,8 @@ seul le message utilise la 4G.
   Le protocole vient de l'interface web du routeur (pas de documentation officielle). Se connecter déconnecte l'interface web
   du routeur (un seul administrateur à la fois) ; après un échec de connexion plus aucune tentative pendant 1 h (le routeur
   bloque 2 h après 10 échecs) ; 5 SMS par jour au maximum. Les SMS sont facturés selon votre forfait.
+- **`/rearm`** remet la journée à zéro : la prochaine alerte de chaque appareil est envoyée (Telegram et SMS), puis de nouveau
+  une seule fois jusqu'au lendemain. Les mouvements antérieurs à `/rearm` ne sont pas rejoués.
 - Un fichier `alerts_state.json` (ignoré par git) retient les appareils déjà alertés aujourd'hui. Redémarrer le listener
   après modification de `config.json` : `sudo systemctl restart housemonitor-listener`.
 
