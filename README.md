@@ -98,6 +98,16 @@ journalctl -u housemonitor-listener -f       # logs en direct
 (Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
 
+### Résumé du matin : détecteurs, aspirateur, lignes masquées
+- **🛡 Détecteurs / caméras** : les entités de la config `arm` (groupes et surnoms), les caméras et les détecteurs de mouvement
+  (nom contenant motion, mouvement, pir, camera, détecteur, présence) y sont regroupés avec leur appareil. Une entité armable
+  affiche son état (`armé` / `désarmé`) et ses changements sur la fenêtre.
+- **Aspirateur** (appareil ayant une entité `vacuum.*`, ex. Roomba) : seule la ligne « Total missions » est toujours affichée,
+  avec `(-)` si elle n'a pas varié ; les autres lignes n'apparaissent que si leur valeur a changé sur 24 h.
+- **Lignes masquées** : `"summary": {"hide": ["upload speed"]}` (défaut) retire du résumé du matin tout capteur dont le nom
+  contient ce texte. `/update all` montre toujours tout.
+- Batteries : une batterie dont le nom contient « batter » est masquée au-dessus du seuil, même sans unité.
+
 ### Résumé du matin : appareils sans interrupteur et batteries
 Les capteurs/alertes d'un appareil sans interrupteur (ex. détecteur PIR) sont regroupés sous « 🏠 Appareils » (`■ nom` puis ses lignes).
 Les batteries (%) au-dessus de 30 % sont masquées ; à 30 % ou moins elles apparaissent avec ⚠️.

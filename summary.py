@@ -27,6 +27,8 @@ DOMAINS = CFG.get("domains", ["sensor", "binary_sensor", "switch", "light", "inp
 EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
 VOLT_RANGE = CFG.get("summary", {}).get("voltage_range", [200, 250])  # V : la tension n'est signalée que hors de cette plage
+HIDE_NAMES = [norm(x) for x in CFG.get("summary", {}).get("hide", ["upload speed"])]  # lignes absentes du résumé du matin (pas de /update all)
+DETECTOR_WORDS = ("motion", "mouvement", "pir", "camera", "detecteur", "presence")
 UNIT_KWH = {"kWh": 1.0, "Wh": 0.001, "MWh": 1000.0}
 HIDE_UNAVAILABLE = CFG.get("hide_unavailable", True)  # /list et /update all : masquer les entités indisponibles
 SEND_RETRY_DELAY = 15  # s entre deux essais d'envoi Telegram (DNS / réseau 4G qui flanche)
@@ -292,7 +294,44 @@ def battery_line(name, unit, states):
     v = floats(states)
     if not v or v[-1] > BATTERY_MAX:
         return None
-    return f"⚠️ {name} : {v[-1]:g}{unit}"
+    return f"⚠️ {name} : {v[-1]:g}{unit or '%'}"
+
+
+def is_battery(name):
+    return "batter" in norm(name)
+
+
+def armed_entities(cur):
+    """Entités de la config « arm » (groupes et surnoms) : détecteurs et caméras pilotés par /arm."""
+    try:
+        import arm  # import tardif : arm importe summary
+        states = {e: s["state"] for e, s in cur.items()}
+        ids = set()
+        for g in arm.groups().values():
+            ids.update(arm.resolve(g, states)[2])
+        for _, ents in arm.nicknames().values():
+            ids.update(e for e in ents if e in cur)
+        return ids
+    except Exception as e:
+        print(f"entités armables illisibles : {type(e).__name__}: {e}", file=sys.stderr)
+        return set()
+
+
+def is_detector(eid, name, armed):
+    dom = eid.split(".")[0]
+    return eid in armed or (dom in ("binary_sensor", "input_boolean", "camera")
+                            and any(w in norm(name) for w in DETECTOR_WORDS))
+
+
+def armed_line(name, series, current):
+    """Détecteur / caméra armable : état actuel et nombre de changements sur la fenêtre."""
+    state = current if current is not None else (series[-1]["state"] if series else "?")
+    if state in ("unavailable", "unknown"):
+        return f"{name} : indisponible"
+    status = "désarmé" if state == "off" else "armé"
+    ev = [ts(x) for i, x in enumerate(series) if i and x["state"] != series[i - 1]["state"]]
+    changes = f"{len(ev)} changement{'s' if len(ev) > 1 else ''} ({times_text(ev, 'dernier')}), " if ev else ""
+    return f"{name} : {changes}{status}"
 
 
 def alert_line(name, states):
@@ -413,6 +452,10 @@ def build():
     sts = states()
     cur = {s["entity_id"]: s for s in sts}
     ents = discover(sts)
+    armed = armed_entities(cur)
+    for eid in armed:  # caméras et autres entités armables : résumées même si leur domaine n'est pas dans « domains »
+        if eid in cur and eid not in ents and not is_ghost(cur[eid]):
+            ents[eid] = (cur[eid].get("attributes", {}).get("friendly_name", eid), "")
     hist = history(list(ents))
     sections = defaultdict(list)
     skipped = []
@@ -422,41 +465,67 @@ def build():
         dev_lines, absorbed = device_lines(ents, hist, dmap, cur)
     except Exception as e:
         print(f"regroupement par appareil impossible : {type(e).__name__}: {e}", file=sys.stderr)
-    groups = defaultdict(list)  # appareil sans interrupteur -> ses lignes
+    # appareils ayant au moins un détecteur / une caméra ; appareils ayant un aspirateur (Roomba…)
+    det_devs = {dmap[e]["d"] for e, (n, _) in ents.items() if (dmap.get(e) or {}).get("d") and is_detector(e, n, armed)}
+    vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
+    groups = defaultdict(list)  # appareil -> ses lignes
+    det_groups = defaultdict(list)  # appareil de détection -> ses lignes
+    DET = "🛡 Détecteurs / caméras"
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
-        if eid in absorbed:
+        if eid in absorbed or any(h in norm(name) for h in HIDE_NAMES):
             continue
         series = hist.get(eid, [])
         dom = eid.split(".")[0]
         info = dmap.get(eid) or {}
-        dname = info.get("n") if info.get("d") else None
+        dev = info.get("d")
+        dname = info.get("n") if dev else None
         label = name  # sous un appareil, son nom est retiré du libellé de l'entité
         if dname and name.lower().startswith(dname.lower()):
             label = name[len(dname):].strip(" -:") or name
+        detector = is_detector(eid, name, armed) or dev in det_devs
         try:  # une entité aux données inattendues ne doit pas faire échouer tout le résumé
             if dom == "sensor":
-                line = (battery_line if unit == "%" and "batter" in norm(name) else numeric_line)(label, unit, series)
+                if is_battery(name):
+                    line = battery_line(label, unit, series)  # rien au-dessus du seuil, ⚠️ en dessous
+                else:
+                    line = numeric_line(label, unit, series)
+                    if line and dev in vac_devs and line.endswith("(stable)"):
+                        # aspirateur : seulement le total des missions et ce qui a varié sur la fenêtre
+                        line = line.replace("(stable)", "(-)") if "total missions" in norm(name) else None
                 key = "📈 Capteurs"
             elif dom == "binary_sensor":
                 line = alert_line(label, series)
                 key = "🚨 Alertes"
+            elif eid in armed or dom == "camera":
+                line = armed_line(label, series, (cur.get(eid) or {}).get("state"))
+                key = DET
             else:
                 line = switch_line(label, series)
                 key = "🔌 Switchs / lumières"
+            if detector and dom in ("binary_sensor", "input_boolean", "camera"):
+                key = DET
+            if dom == "input_boolean" and detector:
+                line = armed_line(label, series, (cur.get(eid) or {}).get("state"))
         except Exception as e:
             print(f"entité ignorée {eid} : {type(e).__name__}: {e}", file=sys.stderr)
             skipped.append(eid)
             continue
         if line:
-            if dname:
+            if dname and dev in det_devs:
+                det_groups[dname].append("  • " + line)
+            elif dname:
                 groups[dname].append("  • " + line)
             else:
                 sections[key].append("• " + line)
     sections["🔌 Switchs / lumières"] += ["• " + l for l in dev_lines]
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
-    for key in ("📈 Capteurs", "🚨 Alertes", "🔌 Switchs / lumières"):  # ordre fixe
-        if sections.get(key):
-            text += f"\n\n{key}\n" + "\n".join(sorted(sections[key], key=str.lower))
+    for key in ("📈 Capteurs", "🚨 Alertes", "🔌 Switchs / lumières", DET):  # ordre fixe
+        body = sorted(sections.get(key, []), key=str.lower)
+        if key == DET:
+            for dname in sorted(det_groups, key=str.lower):
+                body += [f"■ {dname}"] + sorted(det_groups[dname], key=str.lower)
+        if body:
+            text += f"\n\n{key}\n" + "\n".join(body)
     if groups:
         text += "\n\n🏠 Appareils"
         for dname in sorted(groups, key=str.lower):
