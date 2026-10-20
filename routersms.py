@@ -97,7 +97,11 @@ def send(text, to=None):
     router = Router(CONF["host"], CONF["user"], CONF["password"])
     try:
         try:
-            router.login()
+            try:
+                router.login()
+            except PermissionError:
+                time.sleep(10)  # le routeur refuse parfois une connexion juste après une session précédente
+                router.login()  # un seul nouvel essai : 10 échecs bloquent le routeur 2 h
         except PermissionError as e:
             st["blocked_until"] = time.time() + BLOCK_AFTER_FAIL
             _save(st)
