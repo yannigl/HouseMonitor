@@ -1,7 +1,7 @@
 """Première alerte du jour de chaque détecteur / caméra, envoyée sur Telegram (tourne dans un thread du listener).
 
 config.json -> "alerts": {
-    "armed_by": "input_boolean.motion_sensor_armed",      # facultatif : pas d'alerte si ce helper est « off » (/disarm)
+    "armed_by": "input_boolean.motion_sensor_armed",      # facultatif : pas d'alerte si cette entité est « off » (/disarm)
     "sms_service": "notify.sms_moi",                        # facultatif : SMS en plus de Telegram (service notify de HA)
     "poll_seconds": 20,                                    # lecture de l'historique HA (local : aucune data 4G)
     "watch": [
@@ -119,7 +119,7 @@ def check(since):
             continue
         if w["armed_by"]:
             armed = summary.http(f"{summary.HA}/api/states/{w['armed_by']}", summary.AUTH).get("state")
-            if armed != "on":
+            if armed in (None, "off", "unavailable", "unknown"):  # une caméra armée n'est pas « on » mais idle, streaming…
                 continue  # désarmé : l'alerte n'est pas consommée
         msg = f"🚨 Première alerte du jour — {w['name']} à {t:%Hh%M}"
         summary.send(msg)

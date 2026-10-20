@@ -10,3 +10,4 @@ netcount_state.json
 .netcount.lock
 alerts_state.json
 sms_state.json
+arm_timers.json

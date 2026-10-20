@@ -201,7 +201,9 @@ seul le message utilise la 4G.
   ]
 }
 ```
-- `armed_by` : si ce helper est « off » (`/disarm`), aucune alerte n'est envoyée et la 1re alerte du jour n'est pas consommée.
+- `armed_by` : si cette entité est « off » (`/disarm`), aucune alerte n'est envoyée et la 1re alerte du jour n'est pas consommée.
+  Il s'applique à tous les appareils de `watch`, sauf si une entrée a son propre `armed_by`. Pour une caméra, mettre
+  l'entité de la caméra elle-même : `{"entity": "...", "name": "Caméra salon", "armed_by": "camera.living_room_camera"}`.
 - États déclencheurs par défaut : `on` (binary_sensor), `recording` (camera) ; pour une entité `event.*`, tout nouvel événement.
   Pour trouver l'état d'une caméra qui détecte un mouvement : HA → Developer tools → States, filtrez sur la caméra.
 - **SMS en plus** : `"sms_service": "notify.sms_moi"` dans le bloc `alerts` envoie aussi la première alerte par SMS, via un
@@ -216,6 +218,14 @@ seul le message utilise la 4G.
   une seule fois jusqu'au lendemain. Les mouvements antérieurs à `/rearm` ne sont pas rejoués.
 - Un fichier `alerts_state.json` (ignoré par git) retient les appareils déjà alertés aujourd'hui. Redémarrer le listener
   après modification de `config.json` : `sudo systemctl restart housemonitor-listener`.
+
+### Armer / désarmer pour une durée
+`/arm all 30` (minutes), `/disarm all 24h`, `/disarm motion sensor 2d` (unités m, h, d ; 1 minute à 30 jours). À l'échéance, les
+entités reviennent à l'état qu'elles avaient **avant** la commande et un message Telegram le confirme. Une nouvelle commande
+sur les mêmes entités annule la minuterie précédente (l'état d'origine est conservé). `/arm` seul liste les minuteries en cours.
+Un nombre sans unité est des minutes, sauf si le texte entier est un nom d'appareil (« camera 2 »). Les minuteries sont dans
+`arm_timers.json` (ignoré par git) et survivent au redémarrage du listener ; le Pi n'a pas d'horloge à pile, donc juste
+après un reboot l'heure peut être fausse jusqu'à la synchro réseau.
 
 ### Éteindre le Pi à distance (`/shutdown`)
 Pour une coupure de courant prévue. Installation, **une fois** : `sudo ./setup-power.sh` (règle `sudoers`

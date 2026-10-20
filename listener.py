@@ -276,6 +276,7 @@ def loop():
     last_log_day = datetime.now().day
     mtime = ME.stat().st_mtime
     print("listener démarré", flush=True)
+    arm.start_timers()  # retour automatique des /arm et /disarm temporaires
     alerts.start()  # thread : première alerte du jour de chaque détecteur (si « alerts » est configuré)
     try:  # menu "/" de Telegram ; ~0,6 Ko, une fois au démarrage
         tg.call("setMyCommands", commands=json.dumps([{"command": c, "description": d} for c, d in COMMANDS]))
