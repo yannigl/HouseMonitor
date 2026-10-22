@@ -18,7 +18,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-from common import CFG, count, data_block, heartbeat, load_state, log_net, norm
+from common import CFG, count, data_block, fmt_bytes, heartbeat, load_state, log_net, norm
 
 HA = CFG.get("ha_url", "http://127.0.0.1:8123")
 AUTH = {"Authorization": f"Bearer {CFG['ha_token']}"}
@@ -27,7 +27,10 @@ DOMAINS = CFG.get("domains", ["sensor", "binary_sensor", "switch", "light", "inp
 EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
 VOLT_RANGE = CFG.get("summary", {}).get("voltage_range", [200, 250])  # V : la tension n'est signalée que hors de cette plage
-HIDE_NAMES = [norm(x) for x in CFG.get("summary", {}).get("hide", ["upload speed"])]  # lignes absentes du résumé du matin (pas de /update all)
+HIDE_NAMES = [norm(x) for x in CFG.get("summary", {}).get("hide", [])]  # lignes absentes du résumé du matin (pas de /update all)
+ATTACH = CFG.get("summary", {}).get("attach", {})  # {entity_id: nom d'appareil} : rattache une entité sans appareil à un bloc
+RATE_BYTES = {"B/s": 1, "KB/s": 1e3, "kB/s": 1e3, "KiB/s": 1024, "MB/s": 1e6, "MiB/s": 1024 ** 2, "GB/s": 1e9,
+              "GiB/s": 1024 ** 3, "bit/s": 1 / 8, "kbit/s": 125, "Mbit/s": 125e3, "Gbit/s": 125e6}  # octets par seconde
 DETECTOR_WORDS = ("motion", "mouvement", "pir", "camera", "detecteur", "presence")
 UNIT_KWH = {"kWh": 1.0, "Wh": 0.001, "MWh": 1000.0}
 HIDE_UNAVAILABLE = CFG.get("hide_unavailable", True)  # /list et /update all : masquer les entités indisponibles
@@ -281,6 +284,27 @@ def numeric_line(name, unit, states):
             f"actuel {pts[-1][1]:g}{unit}")
 
 
+def traffic_line(name, unit, states, now=None):
+    """Débit (KiB/s…) -> volume écoulé sur la fenêtre (intégrale du débit, approximative) et pic avec son heure."""
+    now = now or datetime.now().astimezone()
+    start = now - timedelta(hours=HOURS)
+    pts = []
+    for st in states:
+        try:
+            pts.append((max(ts(st), start), float(st["state"])))
+        except (ValueError, KeyError, TypeError):
+            pts.append((max(ts(st), start), None))  # unavailable / unknown : on ne compte rien sur cette période
+    if not any(v is not None for _, v in pts):
+        return None
+    total = 0.0
+    for i, (t, v) in enumerate(pts):
+        end = pts[i + 1][0] if i + 1 < len(pts) else now
+        if v is not None and end > t:
+            total += v * (end - t).total_seconds()  # le dernier relevé vaut jusqu'au suivant
+    peak_t, peak = max(((t, v) for t, v in pts if v is not None), key=lambda p: p[1])
+    return (f"{name} : ≈ {fmt_bytes(total * RATE_BYTES[unit])} sur {HOURS} h · pic {peak:g}{unit} à {hm(peak_t)}")
+
+
 def on_events(states):
     """Heures des passages à 'on' (le 1er état peut être un report antérieur)."""
     return [ts(s) for s in states[1:] if s["state"] == "on"]
@@ -478,7 +502,7 @@ def build():
         dom = eid.split(".")[0]
         info = dmap.get(eid) or {}
         dev = info.get("d")
-        dname = info.get("n") if dev else None
+        dname = info.get("n") if dev else ATTACH.get(eid)
         label = name  # sous un appareil, son nom est retiré du libellé de l'entité
         if dname and name.lower().startswith(dname.lower()):
             label = name[len(dname):].strip(" -:") or name
@@ -487,6 +511,8 @@ def build():
             if dom == "sensor":
                 if is_battery(name):
                     line = battery_line(label, unit, series)  # rien au-dessus du seuil, ⚠️ en dessous
+                elif unit in RATE_BYTES:
+                    line = traffic_line(label, unit, series)  # volume (intégrale du débit) et pic, plutôt que la vitesse
                 else:
                     line = numeric_line(label, unit, series)
                     if line and dev in vac_devs and line.endswith("(stable)"):
@@ -511,7 +537,7 @@ def build():
             skipped.append(eid)
             continue
         if line:
-            if dname and dev in det_devs:
+            if dname and (dev in det_devs or (not dev and detector)):
                 det_groups[dname].append("  • " + line)
             elif dname:
                 groups[dname].append("  • " + line)
