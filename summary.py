@@ -302,7 +302,11 @@ def traffic_line(name, unit, states, now=None):
         if v is not None and end > t:
             total += v * (end - t).total_seconds()  # le dernier relevé vaut jusqu'au suivant
     peak_t, peak = max(((t, v) for t, v in pts if v is not None), key=lambda p: p[1])
-    return (f"{name} : ≈ {fmt_bytes(total * RATE_BYTES[unit])} sur {HOURS} h · pic {peak:g}{unit} à {hm(peak_t)}")
+    low = norm(name)
+    sens = "download" if "download" in low else "upload" if "upload" in low else None
+    title = {"download": "Downloaded data", "upload": "Uploaded data"}.get(sens, f"{name} (volume)")
+    peak_word = {"download": "pic de download", "upload": "pic d'upload"}.get(sens, "pic")
+    return (f"{title} : ≈ {fmt_bytes(total * RATE_BYTES[unit])} sur {HOURS} h · {peak_word} {peak:g} {unit} à {hm(peak_t)}")
 
 
 def on_events(states):

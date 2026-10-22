@@ -105,7 +105,7 @@ Le listener se relance tout seul quand le `git pull` du matin modifie `listener.
 - **Aspirateur** (appareil ayant une entité `vacuum.*`, ex. Roomba) : seule la ligne « Total missions » est toujours affichée,
   avec `(-)` si elle n'a pas varié ; les autres lignes n'apparaissent que si leur valeur a changé sur 24 h.
 - **Débits (KiB/s, Mbit/s…)** : au lieu de la vitesse, le résumé donne le **volume** échangé sur la fenêtre (intégrale des relevés
-  du débit, donc approximatif) et le **pic** avec son heure : `Download speed : ≈ 1,20 Go sur 24 h · pic 222KiB/s à 14h52`.
+  du débit, donc approximatif) et le **pic** avec son heure : `Downloaded data : ≈ 1,20 Go sur 24 h · pic de download 222 KiB/s à 14h52` (idem `Uploaded data` / `pic d'upload`).
 - **Rattacher une entité à un bloc** : `"summary": {"attach": {"input_boolean.motion_sensor_armed": "Mezzanine motion detector"}}`
   place une entité sans appareil (un helper) sous le bloc de l'appareil de ce nom (le nom doit être identique).
 - **Lignes masquées** : `"summary": {"hide": ["texte"]}` (vide par défaut) retire du résumé du matin tout capteur dont le nom
