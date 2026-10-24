@@ -39,7 +39,7 @@ import arm
 import control
 import summary
 import vacuum
-from common import (CFG, SERVICES, count, data_block, data_compact, heartbeat, load_state, log_net,
+from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, load_state, log_net,
                     pi_cum, reset_cycle, save_state)
 
 TOKEN = CFG["telegram_token"]
@@ -115,6 +115,7 @@ COMMANDS = [
     ("launch", "Aspirateur : lancer l'aspiration standard — /launch <nom>"),
     ("send", "Aspirateur : retour à la base — /send <nom> home"),
     ("pause", "Aspirateur : pause — /pause <nom>"),
+    ("git", "Mettre à jour le code du Pi : /git pull"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
     ("disarm", "Désarmer : /disarm all, /disarm <groupe> ou /disarm <appareil> (alias /unarm)"),
@@ -135,6 +136,43 @@ def ping_stamp(result, now):
     """Valeur de `last_ping` après une tentative. Un échec réseau est retenté dans PING_RETRY s : avec une période de
     4 h et 1 h de grâce, attendre le ping suivant (4 h) transformerait une coupure d'une minute en fausse alerte."""
     return now - PING_EVERY + PING_RETRY if result is False else now
+
+
+def code_signature():
+    """Dates de modification de tous les .py : le listener importe arm, summary, vacuum… et doit redémarrer si l'un change."""
+    return tuple(sorted((p.name, p.stat().st_mtime) for p in HERE.glob("*.py")))
+
+
+def syntax_error():
+    """None si tout le code se compile, sinon le message d'erreur (pour ne pas redémarrer sur un code cassé)."""
+    files = [str(p) for p in sorted(HERE.glob("*.py"))]
+    r = subprocess.run([sys.executable, "-m", "py_compile", *files], capture_output=True, text=True, timeout=60)
+    return None if r.returncode == 0 else (r.stderr or r.stdout).strip()[-600:]
+
+
+def git_pull():
+    """/git pull : git pull --ff-only sur la branche courante, comme run.sh. Retourne le texte de réponse."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+    def git(*args, timeout=90):
+        return subprocess.run(["git", *args], cwd=HERE, capture_output=True, text=True, timeout=timeout, env=env)
+
+    branch = git("rev-parse", "--abbrev-ref", "HEAD", timeout=15).stdout.strip()
+    if not branch or branch == "HEAD":
+        return "❌ Dépôt en HEAD détaché : pas de git pull automatique."
+    old = git("rev-parse", "--short", "HEAD", timeout=15).stdout.strip()
+    r = git("pull", "-q", "--ff-only", "origin", branch)
+    if r.returncode != 0:
+        return f"❌ git pull a échoué ({branch}) :\n{(r.stderr or r.stdout).strip()[-500:]}"
+    new = git("rev-parse", "--short", "HEAD", timeout=15).stdout.strip()
+    if old == new:
+        return f"✅ Déjà à jour ({new}, {branch})."
+    log = git("log", "--oneline", "-8", f"{old}..{new}", timeout=15).stdout.strip()
+    changed = git("diff", "--name-only", old, new, timeout=15).stdout.split()
+    text = f"✅ Mis à jour {old} → {new} ({branch})\n{log}"
+    if any(f.endswith(".py") for f in changed):
+        text += "\n🔄 Le listener redémarre dans quelques secondes pour charger le nouveau code."
+    return text
 
 
 def can_poweroff():
@@ -246,6 +284,10 @@ def handle(text, st):
     try:
         if cmd in ("/on", "/off"):
             return control.act(cmd == "/on", " ".join(parts[1:]) or None)
+        if cmd == "/git":
+            if [a.lower() for a in parts[1:]] != ["pull"]:
+                return "Seul « /git pull » est permis : mise à jour du code sur le Pi."
+            return git_pull()
         if cmd == "/rearm":
             return alerts.rearm()
         if cmd in vacuum.ACTIONS:
@@ -274,7 +316,8 @@ def loop():
     offset = 0
     last_ping = last_poll = last_sample = 0.0
     last_log_day = datetime.now().day
-    mtime = ME.stat().st_mtime
+    signature = code_signature()
+    warned = None
     print("listener démarré", flush=True)
     arm.start_timers()  # retour automatique des /arm et /disarm temporaires
     alerts.start()  # thread : première alerte du jour de chaque détecteur (si « alerts » est configuré)
@@ -297,11 +340,25 @@ def loop():
             log_net("listener")
             last_log_day = datetime.now().day
 
-        if ME.stat().st_mtime != mtime:  # mis à jour par le git pull du matin
-            print("code mis à jour, redémarrage", flush=True)
-            log_net("listener")
-            pi_cum()
-            os.execv(sys.executable, [sys.executable, str(ME)])
+        if code_signature() != signature:  # mis à jour par le git pull du matin ou par /git pull
+            problem = syntax_error()
+            if problem:  # un code cassé ne doit pas remplacer le listener qui tourne : on garde l'ancien et on prévient
+                if problem != warned:
+                    warned = problem
+                    print(f"code mis à jour mais invalide, pas de redémarrage : {problem}", file=sys.stderr, flush=True)
+                    try:
+                        tg.reply(f"⚠️ Code mis à jour mais invalide : le listener garde l'ancienne version.\n{problem}")
+                    except Exception:
+                        pass
+            else:
+                print("code mis à jour, redémarrage", flush=True)
+                try:  # acquitter les commandes déjà traitées (/git pull…) : sinon le nouveau processus les recevrait de nouveau
+                    tg.call("getUpdates", offset=offset, timeout=0)
+                except Exception:
+                    pass
+                log_net("listener")
+                pi_cum()
+                os.execv(sys.executable, [sys.executable, str(ME)])
 
         if not st["listener"] and now - last_poll < SLOW_POLL:
             # mode éco : on dort jusqu'au prochain ping ou au prochain poll, sans toucher au réseau

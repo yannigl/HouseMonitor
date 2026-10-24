@@ -4,6 +4,7 @@
 Le nom est cherché dans le nom ou l'entity_id, sans casse ni accents ; s'il n'y a qu'un seul aspirateur, le nom est facultatif.
 Ambigu -> rien n'est actionné.
 """
+import threading
 import time
 
 import arm
@@ -57,15 +58,107 @@ def act(cmd, query):
     eid = s["entity_id"]
     if s["state"] == "unavailable":
         return f"⚠️ {_name(s)} ({eid}) est indisponible : rien n'a été actionné."
+    idle = {"/launch": ("cleaning",), "/send": ("docked", "returning"), "/pause": ("docked", "idle", "paused")}
+    if s["state"] in idle[cmd]:  # rien à faire : ne pas déranger le robot (ni attendre 15 s une réponse qui ne viendra pas)
+        return f"ℹ️ {_name(s)} est déjà « {STATE_FR.get(s['state'], s['state'])} » : rien à faire."
     err = arm.call_service("vacuum", service, [eid])
     if err and err != "(2e essai)":
         return f"❌ {_name(s)} ({eid}) : {err}"
-    time.sleep(3)  # laisser le robot réagir avant de relire son état
-    after = {x["entity_id"]: x["state"] for x in summary.states()}.get(eid, "?")
+    attrs = s.get("attributes", {})
+    after = "?"
+    for _ in range(5):  # un robot sur sa base met quelques secondes à partir : on relit jusqu'à 15 s
+        time.sleep(3)
+        try:
+            after, attrs = _read(eid)
+        except Exception:
+            continue
+        if after in EXPECTED[cmd]:
+            break
     ok = after in EXPECTED[cmd]
     text = f"{'✅' if ok else '⚠️'} {_name(s)} {done if ok else ''}".rstrip() + f" → {STATE_FR.get(after, after)}  ({eid})"
     if not ok:
-        text += "\nL'état relu n'est pas celui attendu : le robot n'a peut-être pas encore répondu, vérifiez avec /update all."
+        text += ("\nL'état relu n'est pas celui attendu après 15 s : le robot n'a pas répondu (ou refuse l'ordre). "
+                 "Vérifiez avec /update all.")
+        text += "".join(f"\n{l}" for l in details(attrs))
     if err == "(2e essai)":
         text += "\n↻ réussi au 2e essai (le 1er avait échoué)"
+    if cmd == "/launch":
+        watch(eid, _name(s))
+        text += "\n👀 Je vous préviens ici en cas d'erreur, de bac plein et à la fin du ménage."
     return text
+
+
+# --- suivi après /launch -----------------------------------------------------------------------------------------------
+WATCH_EVERY = 20          # s entre deux lectures de HA (local : aucune data 4G)
+WATCH_MAX = 4 * 3600      # s : on arrête de suivre un robot qui ne finit jamais
+NOT_STARTED_AFTER = 300   # s : prévenir si le robot n'est toujours pas parti
+WATCHING = set()          # un seul suivi par aspirateur
+
+
+def _read(eid):
+    s = summary.http(f"{summary.HA}/api/states/{eid}", summary.AUTH)
+    return s["state"], s.get("attributes", {})
+
+
+def _error(attrs):
+    err = str(attrs.get("error") or "").strip()
+    return "" if err.lower() in ("", "none", "0", "no error", "unknown") else err
+
+
+def details(attrs):
+    """Lignes lisibles tirées des attributs du robot (celles qui existent seulement)."""
+    lines = []
+    if attrs.get("bin_present") is False:
+        lines.append("🗑 Bac absent ⚠️")
+    elif attrs.get("bin_full") is True:
+        lines.append("🗑 Bac plein ⚠️")
+    elif attrs.get("bin_full") is False:
+        lines.append("🗑 Bac : ok")
+    if _error(attrs):
+        lines.append(f"⚠️ Erreur : {_error(attrs)}")
+    if attrs.get("cleaning_time") not in (None, ""):
+        lines.append(f"⏱ Durée de nettoyage : {attrs['cleaning_time']} min")
+    if attrs.get("cleaned_area") not in (None, ""):
+        lines.append(f"📐 Surface : {attrs['cleaned_area']} m²")
+    if attrs.get("battery_level") not in (None, ""):
+        lines.append(f"🔋 Batterie : {attrs['battery_level']} %")
+    return lines
+
+
+def _watch(eid, name):
+    """Après /launch : prévient par Telegram du démarrage manqué, d'une erreur, du bac plein et de la fin du ménage."""
+    try:
+        started, flagged, t0 = False, set(), time.time()
+        while time.time() - t0 < WATCH_MAX:
+            time.sleep(WATCH_EVERY)
+            try:
+                state, attrs = _read(eid)
+            except Exception:
+                continue  # HA injoignable un instant : on réessaie
+            if state == "cleaning":
+                started = True
+            if not started and time.time() - t0 > NOT_STARTED_AFTER:
+                summary.send(f"⚠️ {name} n'a pas démarré (état : {STATE_FR.get(state, state)})\n" + "\n".join(details(attrs)))
+                return
+            err = _error(attrs)
+            if err and ("error", err) not in flagged:
+                flagged.add(("error", err))
+                summary.send(f"⚠️ {name} : erreur « {err} »")
+            if attrs.get("bin_full") is True and "bin" not in flagged:
+                flagged.add("bin")
+                summary.send(f"🗑 {name} : le bac est plein, il faut le vider.")
+            if started and state in ("docked", "idle"):
+                summary.send(f"🧹 {name} a terminé (état : {STATE_FR.get(state, state)})\n" + "\n".join(details(attrs)))
+                return
+        summary.send(f"⚠️ {name} : toujours pas terminé après {WATCH_MAX // 3600} h, je cesse de le suivre.")
+    except Exception as e:
+        print(f"suivi aspirateur KO : {type(e).__name__}: {e}", flush=True)
+    finally:
+        WATCHING.discard(eid)
+
+
+def watch(eid, name):
+    if eid in WATCHING:
+        return
+    WATCHING.add(eid)
+    threading.Thread(target=_watch, args=(eid, name), daemon=True, name="vacuum-watch").start()
