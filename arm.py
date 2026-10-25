@@ -143,7 +143,7 @@ def usage():
     if not gs:
         return ("Aucun groupe d'armement configuré. Ajoutez un bloc « arm » dans config.json "
                 "(voir « Armement » dans le README), puis relancez le listener.")
-    states = {s["entity_id"]: s["state"] for s in summary.states()}
+    states = {s["entity_id"]: summary.effective_state(s) for s in summary.states()}
     lines = ["🛡 /arm all · /arm <groupe> · /arm <surnom ou nom d'un appareil>", "   /disarm … (mêmes cibles, alias /unarm)",
              "   Durée : /disarm all 30 (min), 24h, 2d — retour automatique à l'état précédent", "", "Groupes :"]
     for name, g in gs.items():
@@ -233,7 +233,7 @@ def act(arm, which):
     if not which or not gs:
         return usage()
     states_list = summary.states()
-    states = {s["entity_id"]: s["state"] for s in states_list}
+    states = {s["entity_id"]: summary.effective_state(s) for s in states_list}
     resolved = {name: resolve(g, states) for name, g in gs.items()}
     which, seconds = _split_duration(
         which, lambda w: not isinstance(_select(w, gs, resolved, states, states_list), str))
@@ -260,7 +260,7 @@ def act(arm, which):
                     notes.append(f"{dom}.{service} : réussi au 2e essai (le 1er avait échoué)")
         results.append((label, ok, done, problems, failed, notes))
     time.sleep(2)  # laisser HA et les caméras appliquer le changement avant de relire les états
-    after = {s["entity_id"]: s["state"] for s in summary.states()}
+    after = {s["entity_id"]: summary.effective_state(s) for s in summary.states()}
     out = [("🛡 Armement" if arm else "🔓 Désarmement") + f" : {which}"
            + (f" pour {fmt_duration(seconds)}" if seconds else "")]
     changed = [e for _, _, done, _, _, _ in results for e in done]
@@ -300,7 +300,7 @@ def _restore_one(timer):
         if err and err != "(2e essai)":
             failed.append(f"{dom}.{service} : {err}")
     time.sleep(2)
-    after = {s["entity_id"]: s["state"] for s in summary.states()}
+    after = {s["entity_id"]: summary.effective_state(s) for s in summary.states()}
     kind = "armement" if timer["arm"] else "désarmement"
     lines = [f"⏱ Fin du {kind} temporaire ({fmt_duration(timer['seconds'])}) : {timer['label']}",
              "Retour à l'état précédent :"]

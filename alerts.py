@@ -118,8 +118,8 @@ def check(since):
         if not t:
             continue
         if w["armed_by"]:
-            armed = summary.http(f"{summary.HA}/api/states/{w['armed_by']}", summary.AUTH).get("state")
-            if armed in (None, "off", "unavailable", "unknown"):  # une caméra armée n'est pas « on » mais idle, streaming…
+            armed = summary.effective_state(summary.http(f"{summary.HA}/api/states/{w['armed_by']}", summary.AUTH))
+            if armed in (None, "off", "unavailable", "unknown"):  # caméra : c'est son attribut « monitoring » qui compte
                 continue  # désarmé : l'alerte n'est pas consommée
         msg = f"🚨 Première alerte du jour — {w['name']} à {t:%Hh%M}"
         summary.send(msg)

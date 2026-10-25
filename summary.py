@@ -374,9 +374,22 @@ def is_detector(eid, name, armed):
                             and any(w in norm(name) for w in DETECTOR_WORDS))
 
 
+def effective_state(s):
+    """État « armé / désarmé » d'une entité armable. Une caméra Netatmo reste « idle » qu'elle surveille ou non : c'est son
+    attribut `monitoring` qui dit si elle est armée. -> « on », « off » ou l'état brut (unavailable…)."""
+    state = s["state"]
+    attrs = s.get("attributes", {})
+    if s["entity_id"].startswith("camera.") and "monitoring" in attrs and state not in ("unavailable", "unknown"):
+        return "on" if attrs["monitoring"] else "off"
+    return state
+
+
 def armed_line(name, series, current):
-    """Détecteur / caméra armable : état actuel et nombre de changements sur la fenêtre."""
-    state = current if current is not None else (series[-1]["state"] if series else "?")
+    """Détecteur / caméra armable : état actuel et nombre de changements sur la fenêtre. `current` : l'état HA (dict)."""
+    camera = bool(current) and current["entity_id"].startswith("camera.") and "monitoring" in current.get("attributes", {})
+    state = effective_state(current) if current else (series[-1]["state"] if series else "?")
+    if camera:
+        series = []  # l'historique ne garde que l'état brut (idle…), pas l'attribut monitoring : pas de changements à compter
     if state in ("unavailable", "unknown"):
         return f"{name} : indisponible"
     status = "désarmé" if state == "off" else "armé"
@@ -550,7 +563,7 @@ def build():
                 line = alert_line(label, series)
                 key = "🚨 Alertes"
             elif eid in armed or dom == "camera":
-                line = armed_line(label, series, (cur.get(eid) or {}).get("state"))
+                line = armed_line(label, series, cur.get(eid))
                 key = DET
             else:
                 line = switch_line(label, series)
@@ -558,7 +571,7 @@ def build():
             if detector and dom in ("binary_sensor", "input_boolean", "camera"):
                 key = DET
             if dom == "input_boolean" and detector:
-                line = armed_line(label, series, (cur.get(eid) or {}).get("state"))
+                line = armed_line(label, series, cur.get(eid))
         except Exception as e:
             print(f"entité ignorée {eid} : {type(e).__name__}: {e}", file=sys.stderr)
             skipped.append(eid)
