@@ -149,6 +149,29 @@ def devices_map():
     return {r["e"]: r for r in rows}
 
 
+HIDDEN_ATTRS = ("access_token", "entity_picture", "token", "password", "supported_features", "icon")  # secrets et bruit
+
+
+def state_text(query, limit=12):
+    """/state <mot> : état et attributs des entités dont le nom ou l'entity_id contient les mots (équivalent de
+    Developer tools → States, pour qui ne l'a pas)."""
+    tokens = norm(query).split()
+    found = [s for s in states() if all(t in norm(s["entity_id"] + " " + s.get("attributes", {}).get("friendly_name", ""))
+                                        for t in tokens)]
+    if not found:
+        return f"Aucune entité ne correspond à « {query} »."
+    out = [f"🔎 {len(found)} entité{'s' if len(found) > 1 else ''} pour « {query} »"
+           + (f" (les {limit} premières)" if len(found) > limit else "")]
+    for s in sorted(found, key=lambda s: s["entity_id"])[:limit]:
+        attrs = {k: v for k, v in s.get("attributes", {}).items() if k not in HIDDEN_ATTRS and k != "friendly_name"}
+        out.append(f"\n{s['entity_id']} = {s['state']}  (depuis {ts(s):%d/%m %Hh%M})")
+        if s.get("attributes", {}).get("friendly_name"):
+            out.append(f"   nom : {s['attributes']['friendly_name']}")
+        if attrs:
+            out.append("   " + ", ".join(f"{k}={str(v)[:50]}" for k, v in list(attrs.items())[:10]))
+    return "\n".join(out)
+
+
 def list_flat_text():
     """/list all : toutes les entités, groupées par domaine, avec leur entity_id."""
     by_dom = defaultdict(list)

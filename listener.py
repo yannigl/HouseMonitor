@@ -115,6 +115,7 @@ COMMANDS = [
     ("launch", "Aspirateur : lancer l'aspiration standard — /launch <nom>"),
     ("send", "Aspirateur : retour à la base — /send <nom> home"),
     ("pause", "Aspirateur : pause — /pause <nom>"),
+    ("state", "État et attributs d'une entité : /state <mot> (comme Developer tools → States)"),
     ("git", "Mettre à jour le code du Pi : /git pull"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
@@ -284,6 +285,8 @@ def handle(text, st):
     try:
         if cmd in ("/on", "/off"):
             return control.act(cmd == "/on", " ".join(parts[1:]) or None)
+        if cmd == "/state":
+            return summary.state_text(" ".join(parts[1:])) if parts[1:] else "Usage : /state <mot> (ex. /state living room camera)"
         if cmd == "/git":
             if [a.lower() for a in parts[1:]] != ["pull"]:
                 return "Seul « /git pull » est permis : mise à jour du code sur le Pi."
