@@ -118,6 +118,7 @@ COMMANDS = [
     ("pause", "Aspirateur : pause — /pause <nom>"),
     ("state", "État et attributs d'une entité : /state <mot> (comme Developer tools → States)"),
     ("git", "Mettre à jour le code du Pi : /git pull"),
+    ("restart", "Redémarrer le listener (relit config.json), sans passer par systemd"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
     ("disarm", "Désarmer : /disarm all, /disarm <groupe> ou /disarm <appareil> (alias /unarm)"),
@@ -230,6 +231,21 @@ def shutdown_signal_text(st):
             "log": "/log (note dans le journal, sans alerte)"}.get(SHUTDOWN_SIGNAL, "aucun")
 
 
+def restart(tg, offset):
+    """Exécuté APRÈS l'envoi de la réponse : relit config.json et le code en se relançant, sans dépendre de systemd."""
+    print("redémarrage demandé par /restart", flush=True)
+    try:  # acquitter la commande : sinon le nouveau processus la recevrait de nouveau
+        tg.call("getUpdates", offset=offset, timeout=0)
+    except Exception as e:
+        print(f"acquittement Telegram KO : {e}", file=sys.stderr)
+    try:
+        log_net("listener")
+        pi_cum()
+    except Exception as e:
+        print(f"enregistrement data KO : {e}", file=sys.stderr)
+    os.execv(sys.executable, [sys.executable, str(ME)])
+
+
 def power_off(tg, offset):
     """Exécuté APRÈS l'envoi de l'acquittement."""
     st = load_state()
@@ -283,6 +299,11 @@ def handle(text, st, role="admin"):
     parts = text.lower().split()
     cmd = parts[0].split("@")[0] if parts else ""
     args = parts[1:]
+    if cmd == "/restart":
+        problem = syntax_error()
+        if problem:
+            return f"❌ Redémarrage annulé : le code ne se compile pas.\n{problem}"
+        return "🔄 Le listener redémarre (config.json et code relus). Il répond de nouveau dans quelques secondes.", restart
     if cmd == "/stop" and args[:1] == ["pi"]:
         cmd, args = "/shutdown", args[1:]
     if cmd == "/shutdown":
