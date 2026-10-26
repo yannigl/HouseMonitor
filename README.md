@@ -98,6 +98,13 @@ journalctl -u housemonitor-listener -f       # logs en direct
 (Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
 
+### Résumé du matin : alimentation du Pi
+Une ligne `⚡ Alimentation du Pi : N alertes de sous-tension sur 24 h, dernière à HHhMM` est ajoutée au résumé et à `/update`
+(compte les « Under-voltage detected » du journal du noyau, `journalctl -k`). Le journal étant volatil, la fenêtre ne remonte pas
+avant le dernier démarrage (la ligne l'indique). Elle signale aussi une sous-tension ou un CPU bridé **en ce moment**
+(`vcgencmd get_throttled`). La ligne disparaît si le journal n'est pas lisible : l'utilisateur doit être dans le groupe `adm`
+ou `systemd-journal` (`groups`).
+
 ### Résumé du matin : détecteurs, aspirateur, lignes masquées
 - **🛡 Détecteurs / caméras** : les entités de la config `arm` (groupes et surnoms), les caméras et les détecteurs de mouvement
   (nom contenant motion, mouvement, pir, camera, détecteur, présence) y sont regroupés avec leur appareil. Une entité armable

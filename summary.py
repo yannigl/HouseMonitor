@@ -9,6 +9,8 @@ Découvre toutes les entités via /api/states, puis résume selon le type :
 """
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 import traceback
@@ -512,6 +514,55 @@ def device_lines(ents, hist, dmap, cur):
     return sorted(lines, key=str.lower), absorbed
 
 
+UNDERVOLT = re.compile(r"under-?voltage detected", re.I)
+
+
+def undervoltage_events(hours=24):
+    """Heures (epoch) des « Under-voltage detected » du noyau sur la fenêtre, ou None si le journal n'est pas lisible.
+    Le journal de ce Pi est volatil : il ne remonte pas avant le dernier démarrage."""
+    r = subprocess.run(["journalctl", "-k", "-o", "short-unix", "--no-pager", "-q", "--since", f"{hours} hours ago"],
+                       capture_output=True, text=True, timeout=20)
+    if r.returncode != 0:
+        return None
+    out = []
+    for line in r.stdout.splitlines():
+        if UNDERVOLT.search(line):
+            try:
+                out.append(float(line.split()[0]))
+            except (ValueError, IndexError):
+                pass
+    return out
+
+
+def power_text():
+    """Ligne « alimentation du Pi » : nombre d'alertes de sous-tension sur la fenêtre. Vide si rien n'est lisible
+    (autre machine que le Pi, journal inaccessible)."""
+    try:
+        events = undervoltage_events(HOURS)
+    except Exception as e:
+        print(f"journal du noyau illisible : {type(e).__name__}: {e}", file=sys.stderr)
+        return ""
+    if events is None:
+        return ""
+    now_flag = ""
+    try:  # état instantané : bit 0 = sous-tension en ce moment, bit 2 = CPU bridé
+        v = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True, text=True, timeout=10).stdout
+        flags = int(v.split("=")[1], 16)
+        now_flag = (" · ⚠️ sous-tension en ce moment" if flags & 0x1 else "") + (" · CPU bridé" if flags & 0x4 else "")
+    except Exception:
+        pass
+    try:  # fenêtre réellement couverte : le journal est volatil, il repart à zéro à chaque démarrage
+        uptime_h = float(open("/proc/uptime").read().split()[0]) / 3600
+    except (OSError, ValueError):
+        uptime_h = HOURS
+    since = (f" (depuis le démarrage, il y a {uptime_h:.0f} h)" if uptime_h < HOURS else f" sur {HOURS} h")
+    if not events:
+        return f"\n\n⚡ Alimentation du Pi : aucune alerte de sous-tension{since}{now_flag}"
+    last = datetime.fromtimestamp(events[-1])
+    return (f"\n\n⚡ Alimentation du Pi : {len(events)} alerte{'s' if len(events) > 1 else ''} de sous-tension{since}, "
+            f"dernière à {last:%Hh%M}{now_flag}\n   → alimentation ou câble à vérifier")
+
+
 def build():
     sts = states()
     cur = {s["entity_id"]: s for s in sts}
@@ -600,7 +651,7 @@ def build():
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
                  f"{'s' if len(skipped) > 1 else ''} (données illisibles, détail dans run.log) : {shown}")
-    return text
+    return text + power_text()
 
 
 def send(text):
