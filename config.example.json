@@ -4,6 +4,10 @@
   "telegram_token": "123456:ABC...",
   "telegram_chat_id": "123456789",
 
+  "telegram_groups": [],
+  "telegram_admins": [],
+  "telegram_members": [],
+  "telegram_notify_chats": [],
   "healthchecks": {
     "url": "https://hc-ping.com/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
     "ping_interval_hours": 4,

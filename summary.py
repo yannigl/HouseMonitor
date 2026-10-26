@@ -655,15 +655,26 @@ def build():
 
 
 def send(text):
+    """Envoie au chat du propriétaire, puis aux chats de « telegram_notify_chats » (un groupe, par exemple).
+    Seul un échec vers le chat du propriétaire est une erreur : un groupe injoignable ne bloque rien."""
+    primary = str(CFG["telegram_chat_id"])
+    for chat in [primary] + [str(c) for c in CFG.get("telegram_notify_chats", []) if str(c) != primary]:
+        try:
+            _send_to(chat, text)
+        except Exception as e:
+            if chat == primary:
+                raise
+            print(f"envoi vers {chat} KO : {type(e).__name__}: {e}", file=sys.stderr)
+
+
+def _send_to(chat_id, text):
     # Telegram limite à 4096 caractères par message
     for i in range(0, len(text), 4000):
         for attempt in (1, 2, 3):
             try:
                 http(
                     f"https://api.telegram.org/bot{CFG['telegram_token']}/sendMessage",
-                    data=urllib.parse.urlencode(
-                        {"chat_id": CFG["telegram_chat_id"], "text": text[i:i + 4000]}
-                    ).encode(),
+                    data=urllib.parse.urlencode({"chat_id": chat_id, "text": text[i:i + 4000]}).encode(),
                 )
                 break
             except urllib.error.HTTPError as e:  # 4xx = notre faute, inutile de réessayer

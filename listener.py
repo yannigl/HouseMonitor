@@ -86,14 +86,15 @@ class Telegram:
                     raise
                 print(f"telegram : reconnexion ({e})", file=sys.stderr)
 
-    def reply(self, text, filename="housemonitor.txt"):
-        """Message court, ou pièce jointe .txt au-delà de la limite Telegram (4096)."""
+    def reply(self, text, filename="housemonitor.txt", chat_id=None):
+        """Message court, ou pièce jointe .txt au-delà de la limite Telegram (4096). Par défaut dans le chat du propriétaire."""
+        chat_id = str(chat_id if chat_id is not None else CHAT_ID)
         if len(text) <= 4000:
-            return self.call("sendMessage", chat_id=CHAT_ID, text=text)
+            return self.call("sendMessage", chat_id=chat_id, text=text)
         b = f"----{uuid.uuid4().hex}"
         part = lambda name, val, extra="": (f"--{b}\r\nContent-Disposition: form-data; name=\"{name}\"{extra}"
                                             f"\r\n\r\n").encode() + val + b"\r\n"
-        body = (part("chat_id", CHAT_ID.encode())
+        body = (part("chat_id", chat_id.encode())
                 + part("caption", text.splitlines()[0].encode())
                 + part("document", text.encode(), f'; filename="{filename}"\r\nContent-Type: text/plain')
                 + f"--{b}--\r\n".encode())
@@ -124,8 +125,43 @@ COMMANDS = [
     ("shutdown", "Éteindre le Pi (avec confirmation)"),
     ("stop", "stop listener|ping|monitor"),
     ("start", "start listener|ping|monitor"),
+    ("id", "Identifiants du chat et de l'utilisateur (pour configurer un groupe)"),
     ("help", "Cette aide"),
 ]
+
+# Droits : le chat privé du propriétaire (telegram_chat_id) a tous les droits. Dans un groupe de « telegram_groups »,
+# « telegram_admins » ont tous les droits et « telegram_members » seulement ceux-ci ; les autres sont ignorés sans réponse.
+GROUPS = {int(g) for g in CFG.get("telegram_groups", [])}
+ADMINS = {int(u) for u in CFG.get("telegram_admins", [])}
+MEMBERS = {int(u) for u in CFG.get("telegram_members", [])}
+MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "launch", "send", "pause", "id"}
+
+
+def sender_role(chat_id, user_id):
+    """"admin", "member" ou None (à ignorer)."""
+    if str(chat_id) == CHAT_ID:
+        return "admin"
+    if chat_id in GROUPS:
+        if user_id in ADMINS:
+            return "admin"
+        if user_id in MEMBERS:
+            return "member"
+    return None
+
+
+def member_allows(cmd, args):
+    """Un membre peut lire, armer et piloter l'aspirateur ; jamais désarmer, éteindre, remettre la data à zéro, ni /on, /off,
+    /rearm, /git, /stop, /start."""
+    if cmd.lstrip("/") not in MEMBER_COMMANDS:
+        return False
+    return not (cmd == "/data" and args[:1] == ["reset"])
+
+
+def help_text(role):
+    if role == "admin":
+        return HELP
+    return "🛠 Commandes autorisées ici\n" + "\n".join(f"/{c} — {d}" for c, d in COMMANDS if c in MEMBER_COMMANDS)
+
 
 HELP = "🛠 Commandes\n" + "\n".join(f"/{c} — {d}" for c, d in COMMANDS) + (
     "\n\nlistener : écoute Telegram (stop = mode éco, 1 appel / jour)"
@@ -243,7 +279,7 @@ def status_text(st):
             f"{data_compact()}")
 
 
-def handle(text, st):
+def handle(text, st, role="admin"):
     parts = text.lower().split()
     cmd = parts[0].split("@")[0] if parts else ""
     args = parts[1:]
@@ -274,7 +310,7 @@ def handle(text, st):
     if cmd == "/status":
         return status_text(st)
     if cmd == "/help":
-        return HELP
+        return help_text(role)
     if cmd == "/data":
         if parts[1:2] == ["reset"]:
             before = data_compact()
@@ -314,8 +350,41 @@ def handle(text, st):
     return f"❓ Commande inconnue : {text.split()[0] if parts else ''}\n\n" + HELP
 
 
+def handle_message(msg, bot_username=None):
+    """Un message Telegram -> (texte, suite, chat_id de la réponse), ou None s'il faut l'ignorer."""
+    text = msg.get("text")
+    words = text.split() if text else []
+    if not words:
+        return None
+    chat_id = msg.get("chat", {}).get("id")
+    user_id = msg.get("from", {}).get("id")
+    first = words[0]
+    if "@" in first and bot_username and first.split("@", 1)[1].lower() != bot_username:
+        return None  # commande adressée à un autre bot du groupe
+    cmd = first.split("@")[0].lower()
+    if not cmd.startswith("/") and str(chat_id) != CHAT_ID:
+        return None  # une conversation de groupe qui n'est pas une commande ne nous concerne pas
+    role = sender_role(chat_id, user_id)
+    if cmd == "/id":  # utile avant de configurer un groupe : il n'est pas encore autorisé
+        return (f"chat_id = {chat_id}\nuser_id = {user_id}\nrôle ici : {role or 'non autorisé'}", None, chat_id)
+    if role is None:
+        return None  # on n'obéit qu'au propriétaire et aux groupes configurés, sans répondre aux autres
+    if role == "member" and not member_allows(cmd, [w.lower() for w in words[1:]]):
+        print(f"commande refusée ({cmd}) : membre {user_id}", flush=True)
+        return ("⛔ Cette commande est réservée aux administrateurs.", None, chat_id)
+    print(f"commande reçue ({role}, chat {chat_id}, utilisateur {user_id}) : {text[:40]}", flush=True)
+    out = handle(text, load_state(), role)
+    reply, after = out if isinstance(out, tuple) else (out, None)
+    return reply, after, chat_id
+
+
 def loop():
     tg = Telegram()
+    try:
+        bot_username = (tg.call("getMe").get("result", {}).get("username") or "").lower() or None
+    except Exception as e:
+        bot_username = None
+        print(f"getMe KO : {e}", file=sys.stderr)
     offset = 0
     last_ping = last_poll = last_sample = 0.0
     last_log_day = datetime.now().day
@@ -326,6 +395,9 @@ def loop():
     alerts.start()  # thread : première alerte du jour de chaque détecteur (si « alerts » est configuré)
     try:  # menu "/" de Telegram ; ~0,6 Ko, une fois au démarrage
         tg.call("setMyCommands", commands=json.dumps([{"command": c, "description": d} for c, d in COMMANDS]))
+        for gid in GROUPS:  # dans un groupe, le menu ne propose que ce que les membres peuvent faire
+            tg.call("setMyCommands", scope=json.dumps({"type": "chat", "chat_id": gid}),
+                    commands=json.dumps([{"command": c, "description": d} for c, d in COMMANDS if c in MEMBER_COMMANDS]))
     except Exception as e:
         print(f"setMyCommands KO : {e}", file=sys.stderr)
     while True:
@@ -380,14 +452,11 @@ def loop():
 
         for upd in res.get("result", []):
             offset = upd["update_id"] + 1
-            msg = upd.get("message", {})
-            if str(msg.get("chat", {}).get("id")) != CHAT_ID or "text" not in msg:
-                continue  # on n'obéit qu'à notre chat
-            st = load_state()
-            print(f"commande reçue : {msg['text'][:40]}", flush=True)
-            out = handle(msg["text"], st)
-            text, after = out if isinstance(out, tuple) else (out, None)
-            tg.reply(text)
+            result = handle_message(upd.get("message", {}), bot_username)
+            if result is None:
+                continue
+            text, after, chat_id = result
+            tg.reply(text, chat_id=chat_id)
             if after:
                 after(tg, offset)
 
