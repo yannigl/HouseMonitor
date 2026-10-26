@@ -241,6 +241,14 @@ Un nombre sans unité est des minutes, sauf si le texte entier est un nom d'appa
 `arm_timers.json` (ignoré par git) et survivent au redémarrage du listener ; le Pi n'a pas d'horloge à pile, donc juste
 après un reboot l'heure peut être fausse jusqu'à la synchro réseau.
 
+### Dépannage : caméra Netatmo
+- `/arm` ou `/disarm` renvoie « HTTP 500 » : HA a reçu `429 Too Many Requests` de l'API Netatmo (limite de requêtes, visible avec
+  `docker logs homeassistant | grep 429`). Réessayez dans quelques minutes.
+- Aucun événement de mouvement dans HA et `Webhook not registered - https and port 443 is required` dans le journal : Netatmo ne peut pas
+  joindre HA. Il faut un abonnement Home Assistant Cloud actif (Settings → Home Assistant Cloud) ou HA exposé en HTTPS sur le
+  port 443. Sans cela, les détections ne sont visibles que dans l'appli Netatmo.
+- `403 Forbidden` du flux vidéo local : recharger l'intégration Netatmo.
+
 ### Éteindre le Pi à distance (`/shutdown`)
 Pour une coupure de courant prévue. Installation, **une fois** : `sudo ./setup-power.sh` (règle `sudoers`
 limitée à la seule commande `systemctl poweroff`).

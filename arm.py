@@ -133,6 +133,9 @@ def _call_once(domain, service, entity_ids):
         if e.code >= 500 and not msg:  # HA n'envoie pas de détail pour une erreur interne
             msg = ("erreur interne de Home Assistant (l'intégration a échoué) : "
                    "docker logs --since 5m homeassistant, or Developer tools → Actions")
+            if domain == "camera":
+                msg += (". Pour une caméra Netatmo, c'est souvent la limite d'API de Netatmo (erreur 429 « Too Many Requests » "
+                        "dans le journal) : réessayez dans quelques minutes")
         return f"HTTP {e.code} {msg}".strip()
     except Exception as e:
         return f"{type(e).__name__}: {e}"
