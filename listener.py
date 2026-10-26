@@ -366,8 +366,10 @@ def handle_message(msg, bot_username=None):
         return None  # une conversation de groupe qui n'est pas une commande ne nous concerne pas
     role = sender_role(chat_id, user_id)
     if cmd == "/id":  # utile avant de configurer un groupe : il n'est pas encore autorisé
+        print(f"/id demandé : chat {chat_id}, utilisateur {user_id}", flush=True)
         return (f"chat_id = {chat_id}\nuser_id = {user_id}\nrôle ici : {role or 'non autorisé'}", None, chat_id)
     if role is None:
+        print(f"message ignoré (non autorisé) : chat {chat_id}, utilisateur {user_id}, commande {cmd}", flush=True)
         return None  # on n'obéit qu'au propriétaire et aux groupes configurés, sans répondre aux autres
     if role == "member" and not member_allows(cmd, [w.lower() for w in words[1:]]):
         print(f"commande refusée ({cmd}) : membre {user_id}", flush=True)
@@ -456,7 +458,9 @@ def loop():
             if result is None:
                 continue
             text, after, chat_id = result
-            tg.reply(text, chat_id=chat_id)
+            sent = tg.reply(text, chat_id=chat_id)
+            if not sent.get("ok"):  # ex. le bot n'a pas le droit d'écrire dans ce groupe
+                print(f"réponse non envoyée à {chat_id} : {sent.get('description')}", file=sys.stderr, flush=True)
             if after:
                 after(tg, offset)
 
