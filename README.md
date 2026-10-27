@@ -118,7 +118,7 @@ ou `systemd-journal` (`groups`).
 - **Station météo (Ecowitt)** — réglages par défaut, modifiables dans `summary` de `config.json` (un réglage présent remplace le défaut
   correspondant en entier) :
   - `hide` : capteurs masqués, par texte contenu dans le nom (défaut : dewpoint, hourly rain, rain rate, relative pressure, solar lux,
-    solar radiation, total rain, vapour pressure deficit, weekly rain, yearly rain) ;
+    solar radiation, total rain, vapour pressure deficit, weekly rain, yearly rain, feels like) ;
   - `blocks` : lignes gardées **à la suite**, dans l'ordre. Défaut : `Wind Speed`, `Wind Gust` et `Wind Direction` avec leur ligne
     habituelle (variation, heures, valeur actuelle), puis `Max Daily Gust (hier) : 43.9km/h` (maximum de la veille, minuit à minuit ;
     `-` s'il n'y a pas de relevé). Modes : `line` (ligne habituelle), `max` (maximum de la fenêtre et son heure), `current` (valeur

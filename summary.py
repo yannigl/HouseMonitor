@@ -33,7 +33,7 @@ _SUM = CFG.get("summary", {})
 # Résumé du matin seulement (/update all et /update <mot> montrent tout) :
 HIDE_NAMES = [norm(x) for x in _SUM.get("hide", [  # capteurs masqués : texte contenu dans le nom de l'entité
     "dewpoint", "hourly rain", "rain rate", "relative pressure", "solar lux", "solar radiation", "total rain",
-    "vapour pressure deficit", "weekly rain", "yearly rain"])]
+    "vapour pressure deficit", "weekly rain", "yearly rain", "feels like"])]
 # Blocs de lignes qui restent groupées, dans cet ordre. Modes : « line » = la ligne habituelle (variation et heures),
 # « max » = valeur maximale sur la fenêtre et son heure, « current » = valeur actuelle seulement,
 # « yesterday » = valeur maximale de la veille (minuit à minuit).
