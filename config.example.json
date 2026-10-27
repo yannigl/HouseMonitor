@@ -43,6 +43,13 @@
     "to": "+33600000000",
     "max_per_day": 5
   },
+  "smsweb": {
+    "port": 8081,
+    "host": "0.0.0.0",
+    "max_per_day": 10,
+    "poll_seconds": 300,
+    "contacts": []
+  },
   "alerts": {
     "armed_by": "input_boolean.motion_sensor_armed",
     "poll_seconds": 20,

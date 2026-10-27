@@ -11,3 +11,5 @@ netcount_state.json
 alerts_state.json
 sms_state.json
 arm_timers.json
+sms_inbox.json
+.router.lock

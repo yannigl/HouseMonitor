@@ -11,9 +11,11 @@ Protocole (lu dans l'interface web du routeur, pas de documentation officielle) 
 Le routeur n'accepte qu'un administrateur à la fois (se connecter déconnecte l'interface web) et bloque la connexion deux heures
 après dix échecs : après un échec de connexion, plus aucune tentative pendant BLOCK_AFTER_FAIL s. Au plus `max_per_day` SMS par jour.
 
-Test depuis le Pi :  python3 routersms.py "texte du SMS"
+Test depuis le Pi :  python3 routersms.py "texte du SMS"   ·   python3 routersms.py --probe-inbox (réception, sans afficher les messages)
 """
 import base64
+import contextlib
+import fcntl
 import hashlib
 import json
 import re
@@ -33,13 +35,17 @@ SEND_STATUS = {0: "envoyé", 1: "envoyé mais non enregistré", 2: "non envoyé 
 
 
 def _state():
+    """{"day", "counts": {seau: n}, "blocked_until"} ; les compteurs repartent à zéro chaque jour."""
     try:
         st = json.loads(STATE.read_text())
     except (OSError, ValueError):
         st = {}
     today = datetime.now().strftime("%Y-%m-%d")
     if st.get("day") != today:
-        st = {"day": today, "count": 0, "blocked_until": st.get("blocked_until", 0)}
+        st = {"day": today, "counts": {}, "blocked_until": st.get("blocked_until", 0)}
+    if "count" in st:  # ancien format : un seul compteur, celui des alertes
+        st.setdefault("counts", {})["alerts"] = st.pop("count")
+    st.setdefault("counts", {})
     return st
 
 
@@ -82,50 +88,118 @@ class Router:
             pass
 
 
-def send(text, to=None):
-    """Envoie un SMS. Retourne (ok, détail). Ne lève jamais d'exception."""
-    to = to or CONF.get("to")
-    if not (CONF.get("host") and CONF.get("user") and CONF.get("password") and to):
-        return False, "sms non configuré (host, user, password, to)"
-    if not re.fullmatch(r"\+?\d{1,19}", to):
-        return False, f"numéro invalide : {to}"
+LOCK_FILE = HERE / ".router.lock"
+LIMITS = {"alerts": lambda: CONF.get("max_per_day", 5), "web": lambda: CFG.get("smsweb", {}).get("max_per_day", 10)}
+
+
+class RouterBusy(Exception):
+    """Le routeur ne peut pas être utilisé maintenant (connexion refusée, pause en cours, autre programme en cours)."""
+
+
+@contextlib.contextmanager
+def router_session(wait=90):
+    """Une seule session d'administration à la fois sur le routeur : les programmes (bot, page web) passent l'un après l'autre
+    grâce à un verrou de fichier. Se connecte (un nouvel essai après 10 s), puis se déconnecte toujours."""
+    if not (CONF.get("host") and CONF.get("user") and CONF.get("password")):
+        raise RouterBusy("sms non configuré (host, user, password)")
     st = _state()
     if time.time() < st.get("blocked_until", 0):
-        return False, "envoi suspendu après un échec de connexion au routeur (réessai dans moins d'une heure)"
-    if st["count"] >= CONF.get("max_per_day", 5):
-        return False, f"limite de {CONF.get('max_per_day', 5)} SMS par jour atteinte"
-    router = Router(CONF["host"], CONF["user"], CONF["password"])
-    try:
+        raise RouterBusy("accès au routeur suspendu après un échec de connexion (réessai dans moins d'une heure)")
+    with open(LOCK_FILE, "w") as lock:
+        deadline = time.time() + wait
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() > deadline:
+                    raise RouterBusy("le routeur est utilisé par un autre programme, réessayez")
+                time.sleep(1)
+        router = Router(CONF["host"], CONF["user"], CONF["password"])
         try:
             try:
-                router.login()
-            except PermissionError:
-                time.sleep(10)  # le routeur refuse parfois une connexion juste après une session précédente
-                router.login()  # un seul nouvel essai : 10 échecs bloquent le routeur 2 h
-        except PermissionError as e:
-            st["blocked_until"] = time.time() + BLOCK_AFTER_FAIL
+                try:
+                    router.login()
+                except PermissionError:
+                    time.sleep(10)  # le routeur refuse parfois une connexion juste après une session précédente
+                    router.login()  # un seul nouvel essai : 10 échecs bloquent le routeur 2 h
+            except PermissionError as e:
+                st = _state()
+                st["blocked_until"] = time.time() + BLOCK_AFTER_FAIL
+                _save(st)
+                raise RouterBusy(str(e))
+            yield router
+        finally:
+            if router.base:
+                router.logout()  # libère la session d'administration
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def sent_today(bucket="alerts"):
+    return _state()["counts"].get(bucket, 0)
+
+
+def send(text, to=None, bucket="alerts"):
+    """Envoie un SMS. `bucket` : « alerts » (le bot) ou « web » (la page) : chacun a son plafond quotidien.
+    Retourne (ok, détail). Ne lève jamais d'exception."""
+    to = to or CONF.get("to")
+    if not to:
+        return False, "sms non configuré (to)"
+    if not re.fullmatch(r"\+?\d{1,19}", to):
+        return False, f"numéro invalide : {to}"
+    limit = LIMITS[bucket]()
+    if sent_today(bucket) >= limit:
+        return False, f"limite de {limit} SMS par jour atteinte"
+    try:
+        with router_session() as router:
+            sent_at = ",".join(str(x) for x in (lambda d: (d.year, d.month, d.day, d.hour, d.minute, d.second))(datetime.now()))
+            r = router.call(3, {"sendMessage": {"to": to, "textContent": text[:300], "sendTime": sent_at}})
+            if r.get("result") != 0:
+                return False, f"le routeur a refusé l'envoi (résultat {r.get('result')})"
+            st = _state()
+            st["counts"][bucket] = st["counts"].get(bucket, 0) + 1
             _save(st)
-            return False, str(e)
-        sent_at = ",".join(str(x) for x in (lambda d: (d.year, d.month, d.day, d.hour, d.minute, d.second))(datetime.now()))
-        r = router.call(3, {"sendMessage": {"to": to, "textContent": text[:300], "sendTime": sent_at}})
-        if r.get("result") != 0:
-            return False, f"le routeur a refusé l'envoi (résultat {r.get('result')})"
-        st["count"] += 1
-        _save(st)
-        for _ in range(20):  # l'envoi est asynchrone : on attend le verdict du routeur
-            time.sleep(3)
-            res = router.call(7).get("result")
-            if res != 4:
-                return res == 0, SEND_STATUS.get(res, f"résultat {res}")
-        return False, "délai dépassé : état de l'envoi inconnu"
+            for _ in range(20):  # l'envoi est asynchrone : on attend le verdict du routeur
+                time.sleep(3)
+                res = router.call(7).get("result")
+                if res != 4:
+                    return res == 0, SEND_STATUS.get(res, f"résultat {res}")
+            return False, "délai dépassé : état de l'envoi inconnu"
+    except RouterBusy as e:
+        return False, str(e)
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
-    finally:
-        if router.base:
-            router.logout()  # libère la session d'administration
+
+
+def read_inbox(max_pages=10):
+    """Lit la boîte de réception du routeur, sans rien marquer ni supprimer.
+    -> (ok, messages ou détail) ; chaque message : {"index", "from", "content", "receivedTime", "unread"}."""
+    out, seen = [], set()
+    try:
+        with router_session() as router:
+            for page in range(1, max_pages + 1):
+                r = router.call(2, {"box": 0, "pageNumber": page})  # box 0 = reçus, comme dans le code de la page du routeur
+                batch = r.get("messageList") or []
+                fresh = [m for m in batch if m.get("index") not in seen]
+                if not fresh:
+                    break  # page vide, ou le routeur répète la dernière page
+                seen.update(m.get("index") for m in fresh)
+                out += fresh
+    except RouterBusy as e:
+        return False, str(e)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+    return True, out
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--probe-inbox"]:  # structure de la boîte de réception, sans afficher les messages
+        ok, res = read_inbox()
+        if not ok:
+            print("❌ " + res)
+            sys.exit(1)
+        print(f"✅ {len(res)} message(s) reçu(s) ; champs : {sorted(res[0]) if res else 'aucun message'}")
+        sys.exit(0)
     ok, detail = send(" ".join(sys.argv[1:]) or "Test HouseMonitor")
     print(("✅ " if ok else "❌ ") + detail)
     sys.exit(0 if ok else 1)
