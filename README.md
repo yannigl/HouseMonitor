@@ -123,6 +123,7 @@ ou `systemd-journal` (`groups`).
     habituelle (variation, heures, valeur actuelle), puis `Max Daily Gust (hier) : 43.9km/h` (maximum de la veille, minuit à minuit ;
     `-` s'il n'y a pas de relevé). Modes : `line` (ligne habituelle), `max` (maximum de la fenêtre et son heure), `current` (valeur
     actuelle, avec la lettre cardinale pour une direction en °), `yesterday` (maximum de la veille) ;
+  - `order` : groupes de capteurs affichés à la suite, dans l'ordre. Défaut : `Monthly Rain` puis `Event Rain` ;
   - `annotate` : capteur annexe affiché à côté d'un capteur principal du même appareil. Défaut : `Indoor Temperature (dew point) : … (15-15.8)`
     (plage) et `Monthly Rain : 10.4mm (daily 1.5mm hier)`, ou `(-)` s'il n'a pas plu hier (mode `yesterday`).
   Exemple : `"summary": {"hide": ["solar lux"], "blocks": [{"title": "Wind", "lines": [{"match": "wind speed", "mode": "max"}]}],

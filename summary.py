@@ -41,6 +41,8 @@ BLOCKS = [{"title": b["title"], "lines": [{"match": norm(x["match"]), "mode": x.
           for b in _SUM.get("blocks", [{"title": "Wind", "lines": [
               {"match": "wind speed", "mode": "line"}, {"match": "wind gust", "mode": "line"},
               {"match": "max daily gust", "mode": "yesterday"}, {"match": "wind direction", "mode": "line"}]}])]
+# Groupes de capteurs affichés à la suite les uns des autres, dans cet ordre (le groupe se place où le 1er serait par ordre alphabétique) :
+ORDER = [[norm(x) for x in g] for g in _SUM.get("order", [["monthly rain", "event rain"]])]
 # Annexe affichée à côté d'un capteur principal du même appareil : mode « range » = plage entre parenthèses ; mode
 # « yesterday » = total de la veille (« Monthly Rain : 10.4mm (daily 1.5mm hier) », « (-) » s'il n'a pas plu).
 ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.get("label", ""), "mode": a.get("mode", "range")}
@@ -617,6 +619,16 @@ def put(bucket, text, key=None):
     bucket.append((key or text.lower(), text))
 
 
+def order_key(name):
+    """Clé de tri d'un capteur d'un groupe `ORDER` (None sinon) : le groupe reste contigu, dans l'ordre configuré."""
+    low = norm(name)
+    for g in ORDER:
+        for i, pattern in enumerate(g):
+            if pattern in low:
+                return f"{g[0]}\x00{i:03d}"
+    return None
+
+
 def lines_of(bucket):
     return [t for _, t in sorted(bucket)]
 
@@ -772,11 +784,11 @@ def build():
             continue
         if line:
             if dname and (dev in det_devs or (not dev and detector)):
-                put(det_groups[dname], "  • " + line)
+                put(det_groups[dname], "  • " + line, order_key(name))
             elif dname:
-                put(groups[dname], "  • " + line)
+                put(groups[dname], "  • " + line, order_key(name))
             else:
-                put(sections[key], "• " + line)
+                put(sections[key], "• " + line, order_key(name))
     for (dev, dname, title), members in blocks.items():  # lignes d'un bloc : à la suite, dans l'ordre configuré
         for rank in sorted(members):
             label, unit, series, mode, current, name, eid = members[rank]
