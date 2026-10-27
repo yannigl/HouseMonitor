@@ -115,6 +115,18 @@ ou `systemd-journal` (`groups`).
   du débit, donc approximatif) et le **pic** avec son heure : `Downloaded data : ≈ 1,20 Go sur 24 h · pic de download 222 KiB/s à 14h52` (idem `Uploaded data` / `pic d'upload`).
 - **Rattacher une entité à un bloc** : `"summary": {"attach": {"input_boolean.motion_sensor_armed": "Mezzanine motion detector"}}`
   place une entité sans appareil (un helper) sous le bloc de l'appareil de ce nom (le nom doit être identique).
+- **Station météo (Ecowitt)** — réglages par défaut, modifiables dans `summary` de `config.json` :
+  - `hide` masque les capteurs dont le nom contient l'un de ces textes (défaut : dewpoint, hourly rain, rain rate, relative pressure,
+    solar lux, solar radiation, total rain, vapour pressure deficit) ;
+  - `merge` regroupe plusieurs capteurs d'un même appareil en une ligne de maxima (défaut : `Wind` = wind speed, wind gust, max daily
+    gust → `Wind (max 24 h) : Wind Gust 25.6km/h à 21h41 · …`) ;
+  - `annotate` ajoute la plage d'un capteur annexe entre parenthèses (défaut : le dew point intérieur après la température intérieure :
+    `Indoor Temperature (dew point) : 25.1°C à 21h26 → 26.7°C à 11h50, actuel 26.7°C (15-15.8)`).
+  Exemple : `"summary": {"hide": ["solar lux"], "merge": [{"title": "Wind", "match": ["wind speed", "wind gust"]}],
+  "annotate": [{"entity": "indoor temperature", "with": "indoor dewpoint", "label": "dew point"}]}`. Un réglage présent dans
+  `config.json` remplace le défaut correspondant en entier.
+- **Températures en °F** : le résumé les convertit en °C (HA laisse certains capteurs dans leur unité d'origine). `/update all` garde
+  la valeur brute de HA.
 - **Lignes masquées** : `"summary": {"hide": ["texte"]}` (vide par défaut) retire du résumé du matin tout capteur dont le nom
   contient ce texte. `/update all` montre toujours tout.
 - Batteries : une batterie dont le nom contient « batter » est masquée au-dessus du seuil, même sans unité.
