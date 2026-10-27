@@ -27,7 +27,6 @@
 
   "summary": {
     "voltage_range": [200, 250],
-    "hide": [],
     "attach": {}
   },
   "control": {

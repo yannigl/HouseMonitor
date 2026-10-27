@@ -115,16 +115,16 @@ ou `systemd-journal` (`groups`).
   du débit, donc approximatif) et le **pic** avec son heure : `Downloaded data : ≈ 1,20 Go sur 24 h · pic de download 222 KiB/s à 14h52` (idem `Uploaded data` / `pic d'upload`).
 - **Rattacher une entité à un bloc** : `"summary": {"attach": {"input_boolean.motion_sensor_armed": "Mezzanine motion detector"}}`
   place une entité sans appareil (un helper) sous le bloc de l'appareil de ce nom (le nom doit être identique).
-- **Station météo (Ecowitt)** — réglages par défaut, modifiables dans `summary` de `config.json` :
-  - `hide` masque les capteurs dont le nom contient l'un de ces textes (défaut : dewpoint, hourly rain, rain rate, relative pressure,
-    solar lux, solar radiation, total rain, vapour pressure deficit) ;
-  - `merge` regroupe plusieurs capteurs d'un même appareil en une ligne de maxima (défaut : `Wind` = wind speed, wind gust, max daily
-    gust → `Wind (max 24 h) : Wind Gust 25.6km/h à 21h41 · …`) ;
-  - `annotate` ajoute la plage d'un capteur annexe entre parenthèses (défaut : le dew point intérieur après la température intérieure :
-    `Indoor Temperature (dew point) : 25.1°C à 21h26 → 26.7°C à 11h50, actuel 26.7°C (15-15.8)`).
-  Exemple : `"summary": {"hide": ["solar lux"], "merge": [{"title": "Wind", "match": ["wind speed", "wind gust"]}],
-  "annotate": [{"entity": "indoor temperature", "with": "indoor dewpoint", "label": "dew point"}]}`. Un réglage présent dans
-  `config.json` remplace le défaut correspondant en entier.
+- **Station météo (Ecowitt)** — réglages par défaut, modifiables dans `summary` de `config.json` (un réglage présent remplace le défaut
+  correspondant en entier) :
+  - `hide` : capteurs masqués, par texte contenu dans le nom (défaut : dewpoint, hourly rain, rain rate, relative pressure, solar lux,
+    solar radiation, total rain, vapour pressure deficit, weekly rain, yearly rain) ;
+  - `blocks` : lignes gardées **à la suite**, dans l'ordre. Défaut : `Wind Speed : max 23.4km/h à 21h41`, `Wind Gust : max …`,
+    `Max Daily Gust : max …`, `Wind Direction : 169° (S)` (« max » = maximum sur la fenêtre et son heure, « current » = valeur actuelle) ;
+  - `annotate` : capteur annexe affiché à côté d'un capteur principal du même appareil. Défaut : `Indoor Temperature (dew point) : … (15-15.8)`
+    (plage) et `Monthly Rain : 10.4mm (daily 1.5mm hier)`, ou `(-)` s'il n'a pas plu hier (mode `yesterday`).
+  Exemple : `"summary": {"hide": ["solar lux"], "blocks": [{"title": "Wind", "lines": [{"match": "wind speed", "mode": "max"}]}],
+  "annotate": [{"entity": "monthly rain", "with": "daily rain", "label": "daily", "mode": "yesterday"}]}`.
 - **Températures en °F** : le résumé les convertit en °C (HA laisse certains capteurs dans leur unité d'origine). `/update all` garde
   la valeur brute de HA.
 - **Lignes masquées** : `"summary": {"hide": ["texte"]}` (vide par défaut) retire du résumé du matin tout capteur dont le nom

@@ -30,14 +30,22 @@ EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
 VOLT_RANGE = CFG.get("summary", {}).get("voltage_range", [200, 250])  # V : la tension n'est signalée que hors de cette plage
 _SUM = CFG.get("summary", {})
-# Résumé du matin seulement (/update all montre tout) :
+# Résumé du matin seulement (/update all et /update <mot> montrent tout) :
 HIDE_NAMES = [norm(x) for x in _SUM.get("hide", [  # capteurs masqués : texte contenu dans le nom de l'entité
     "dewpoint", "hourly rain", "rain rate", "relative pressure", "solar lux", "solar radiation", "total rain",
-    "vapour pressure deficit"])]
-MERGE = [{"title": m["title"], "match": [norm(x) for x in m["match"]]}  # plusieurs capteurs -> une ligne de maxima
-         for m in _SUM.get("merge", [{"title": "Wind", "match": ["wind speed", "wind gust", "max daily gust"]}])]
-ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.get("label", "")}  # plage d'un 2e capteur
-            for a in _SUM.get("annotate", [{"entity": "indoor temperature", "with": "indoor dewpoint", "label": "dew point"}])]
+    "vapour pressure deficit", "weekly rain", "yearly rain"])]
+# Blocs de lignes qui restent groupées, dans cet ordre : « max » = valeur maximale sur la fenêtre et son heure,
+# « current » = valeur actuelle seulement.
+BLOCKS = [{"title": b["title"], "lines": [{"match": norm(x["match"]), "mode": x.get("mode", "max")} for x in b["lines"]]}
+          for b in _SUM.get("blocks", [{"title": "Wind", "lines": [
+              {"match": "wind speed", "mode": "max"}, {"match": "wind gust", "mode": "max"},
+              {"match": "max daily gust", "mode": "max"}, {"match": "wind direction", "mode": "current"}]}])]
+# Annexe affichée à côté d'un capteur principal du même appareil : mode « range » = plage entre parenthèses ; mode
+# « yesterday » = total de la veille (« Monthly Rain : 10.4mm (daily 1.5mm hier) », « (-) » s'il n'a pas plu).
+ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.get("label", ""), "mode": a.get("mode", "range")}
+            for a in _SUM.get("annotate", [
+                {"entity": "indoor temperature", "with": "indoor dewpoint", "label": "dew point", "mode": "range"},
+                {"entity": "monthly rain", "with": "daily rain", "label": "daily", "mode": "yesterday"}])]
 ATTACH = CFG.get("summary", {}).get("attach", {})  # {entity_id: nom d'appareil} : rattache une entité sans appareil à un bloc
 RATE_BYTES = {"B/s": 1, "KB/s": 1e3, "kB/s": 1e3, "KiB/s": 1024, "MB/s": 1e6, "MiB/s": 1024 ** 2, "GB/s": 1e9,
               "GiB/s": 1024 ** 3, "bit/s": 1 / 8, "kbit/s": 125, "Mbit/s": 125e3, "Gbit/s": 125e6}  # octets par seconde
@@ -252,14 +260,34 @@ def list_text(query=None):
     return "\n".join(out) + hidden_note(hidden)
 
 
-def all_states_text():
-    """/update all : état actuel de toutes les entités, regroupées par appareil (puis par domaine pour celles sans appareil)."""
+# Les noms HA sont le plus souvent en anglais : quelques mots français courants cherchent aussi leur équivalent anglais.
+ALIASES = {"humidite": "humidity", "pression": "pressure", "vent": "wind", "pluie": "rain", "batterie": "battery",
+           "bruit": "noise", "rafale": "gust", "tension": "voltage", "puissance": "power", "energie": "energy",
+           "courant": "current", "mouvement": "motion", "luminosite": "illuminance", "camera": "camera"}
+
+
+def all_states_text(query=None):
+    """/update all : état actuel de toutes les entités, regroupées par appareil (puis par domaine pour celles sans appareil).
+    /update <mots> : seulement celles dont le nom, l'entity_id, l'appareil, le modèle ou la pièce contient tous les mots,
+    indisponibles comprises (utile pour comprendre pourquoi une mesure manque)."""
     keep, hidden = snapshot()
     try:
         dmap = devices_map()
     except Exception as e:  # sans registre d'appareils : tout est « sans appareil », groupé par domaine
         print(f"regroupement par appareil impossible : {type(e).__name__}: {e}", file=sys.stderr)
         dmap = {}
+    if query:
+        tokens = norm(query).split()
+
+        def matches(s):
+            i = dmap.get(s["entity_id"]) or {}
+            blob = norm(" ".join(str(x) for x in (s["entity_id"], s.get("attributes", {}).get("friendly_name", ""),
+                                                  i.get("n"), i.get("m"), i.get("o"), i.get("a")) if x))
+            return all(t in blob or ALIASES.get(t, t) in blob for t in tokens)
+        keep = [s for s in states() if matches(s) and not is_ghost(s)]
+        hidden = 0
+        if not keep:
+            return f"Aucune entité ne correspond à « {query} »."
     devices, loose = {}, []
     for s in keep:
         info = dmap.get(s["entity_id"]) or {}
@@ -272,7 +300,8 @@ def all_states_text():
         a = s.get("attributes", {})
         return s["state"] + ("" if s["state"] in ("unknown", "unavailable") else a.get("unit_of_measurement", ""))
 
-    out = [f"🔄 États au {datetime.now():%d/%m %Hh%M}"]
+    out = [f"🔄 États au {datetime.now():%d/%m %Hh%M}"
+           + (f" — {len(keep)} entité{'s' if len(keep) > 1 else ''} pour « {query} »" if query else "")]
     for dev in sorted(devices.values(), key=lambda d: (d["info"].get("n") or "").lower()):
         i = dev["info"]
         name = i.get("n") or "Appareil sans nom"
@@ -291,11 +320,13 @@ def all_states_text():
     return "\n".join(out) + hidden_note(hidden)
 
 
-def history(entity_ids):
-    start = datetime.now(timezone.utc) - timedelta(hours=HOURS)
-    qs = urllib.parse.urlencode(
-        {"filter_entity_id": ",".join(entity_ids), "minimal_response": "", "no_attributes": ""}
-    )
+def history(entity_ids, start=None, end=None):
+    """Historique des entités : par défaut sur la fenêtre du résumé ; `start` et `end` (datetime avec fuseau) pour une autre période."""
+    start = start or datetime.now(timezone.utc) - timedelta(hours=HOURS)
+    params = {"filter_entity_id": ",".join(entity_ids), "minimal_response": "", "no_attributes": ""}
+    if end:
+        params["end_time"] = end.isoformat()
+    qs = urllib.parse.urlencode(params)
     data = http(f"{HA}/api/history/period/{start.isoformat()}?{qs}", AUTH)
     return {lst[0]["entity_id"]: lst for lst in data if lst}
 
@@ -364,6 +395,29 @@ def peak_of(series):
         except (ValueError, KeyError, TypeError):
             pass
     return max(pts, key=lambda p: p[0]) if pts else None
+
+
+def yesterday_total(eid):
+    """Plus haute valeur d'un compteur journalier hier (de minuit à minuit), ou None s'il n'a rien relevé ou valait 0."""
+    today0 = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+    series = history([eid], today0 - timedelta(days=1), today0).get(eid, [])
+    v = floats(series)
+    return max(v) if v and max(v) > 0 else None
+
+
+COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"]
+
+
+def block_line(label, unit, series, mode, current, name):
+    """Une ligne d'un bloc (vent…) : « max » sur la fenêtre avec l'heure, ou la valeur « current »."""
+    if mode == "current":
+        v = floats([current] if current else series[-1:])
+        if not v:
+            return None
+        deg = f" ({COMPASS[round(v[-1] / 22.5) % 16]})" if unit == "°" and "direction" in norm(name) else ""
+        return f"{label} : {v[-1]:g}{unit}{deg}"
+    peak = peak_of(series)
+    return f"{label} : max {peak[0]:g}{unit} à {hm(peak[1])}" if peak else None
 
 
 def range_text(series):
@@ -552,6 +606,15 @@ def device_lines(ents, hist, dmap, cur):
     return sorted(lines, key=str.lower), absorbed
 
 
+def put(bucket, text, key=None):
+    """Ajoute une ligne à un paquet ; l'ordre d'affichage suit `key` (par défaut le texte, sans casse)."""
+    bucket.append((key or text.lower(), text))
+
+
+def lines_of(bucket):
+    return [t for _, t in sorted(bucket)]
+
+
 UNDERVOLT = re.compile(r"under-?voltage detected", re.I)
 
 
@@ -624,7 +687,7 @@ def build():
     groups = defaultdict(list)  # appareil -> ses lignes
     det_groups = defaultdict(list)  # appareil de détection -> ses lignes
     DET = "🛡 Détecteurs / caméras"
-    # plage d'un capteur annexe affichée entre parenthèses à côté d'un capteur principal du même appareil
+    # capteur annexe affiché à côté d'un capteur principal du même appareil (plage, ou total de la veille)
     annotations, annexes = {}, set()
     for rule in ANNOTATE:
         for eid, (name, unit) in ents.items():
@@ -632,10 +695,19 @@ def build():
                 dev = (dmap.get(eid) or {}).get("d")
                 for eid2, (name2, unit2) in ents.items():
                     if rule["with"] in norm(name2) and (dmap.get(eid2) or {}).get("d") == dev:
-                        annotations[eid] = (rule["label"], range_text(to_celsius(hist.get(eid2, []), unit2)[0]))
+                        try:
+                            if rule["mode"] == "yesterday":
+                                y = yesterday_total(eid2)
+                                text = f"{rule['label']} {y:g}{unit2} hier".strip() if y else "-"
+                            else:
+                                text = range_text(to_celsius(hist.get(eid2, []), unit2)[0])
+                        except Exception as e:  # l'annexe ne doit jamais faire échouer le résumé
+                            print(f"annexe ignorée {eid2} : {type(e).__name__}: {e}", file=sys.stderr)
+                            text = ""
+                        annotations[eid] = (rule["mode"], rule["label"], text)
                         annexes.add(eid2)
                         break
-    merges = defaultdict(list)  # (appareil, titre) -> [(libellé, unité, série)]
+    blocks = defaultdict(dict)  # (appareil, nom, titre) -> {rang: (libellé, unité, série, mode, état actuel, nom)}
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
         if eid in absorbed or eid in annexes or any(h in norm(name) for h in HIDE_NAMES):
             continue
@@ -650,9 +722,11 @@ def build():
         detector = is_detector(eid, name, armed) or dev in det_devs
         if dom == "sensor":
             series, unit = to_celsius(series, unit)
-            rule = next((m for m in MERGE if any(x in norm(name) for x in m["match"])), None)
-            if rule and not is_battery(name):  # vent : une seule ligne avec les maxima
-                merges[(dev or dname, dname, rule["title"])].append((label, unit, series))
+            slot = next(((b["title"], i, ln) for b in BLOCKS for i, ln in enumerate(b["lines"])
+                         if ln["match"] in norm(name)), None)
+            if slot and not is_battery(name):  # vent… : lignes regroupées, valeurs maximales de la fenêtre
+                title, rank, ln = slot
+                blocks[(dev or dname, dname, title)][rank] = (label, unit, series, ln["mode"], cur.get(eid), name)
                 continue
         try:  # une entité aux données inattendues ne doit pas faire échouer tout le résumé
             if dom == "sensor":
@@ -662,9 +736,13 @@ def build():
                     line = traffic_line(label, unit, series)  # volume (intégrale du débit) et pic, plutôt que la vitesse
                 else:
                     note = annotations.get(eid)
-                    line = numeric_line(f"{label} ({note[0]})" if note and note[0] else label, unit, series)
-                    if line and note and note[1]:
-                        line += f" ({note[1]})"
+                    if note and note[0] == "yesterday":  # « Monthly Rain : 10.4mm (daily 1.5mm hier) » / « (-) »
+                        v = floats(series)
+                        line = f"{label} : {v[-1]:g}{unit} ({note[2]})" if v else None
+                    else:
+                        line = numeric_line(f"{label} ({note[1]})" if note and note[1] else label, unit, series)
+                        if line and note and note[2]:
+                            line += f" ({note[2]})"
                     if line and dev in vac_devs and line.endswith("(stable)"):
                         # aspirateur : seulement le total des missions et ce qui a varié sur la fenêtre
                         line = line.replace("(stable)", "(-)") if "total missions" in norm(name) else None
@@ -688,38 +766,42 @@ def build():
             continue
         if line:
             if dname and (dev in det_devs or (not dev and detector)):
-                det_groups[dname].append("  • " + line)
+                put(det_groups[dname], "  • " + line)
             elif dname:
-                groups[dname].append("  • " + line)
+                put(groups[dname], "  • " + line)
             else:
-                sections[key].append("• " + line)
-    for (dev, dname, title), members in merges.items():  # « Wind (max 24 h) : Wind Speed 23.4km/h à 21h41 · … »
-        parts = []
-        for label, unit, series in members:
-            peak = peak_of(series)
-            if peak:
-                parts.append(f"{label} {peak[0]:g}{unit} à {hm(peak[1])}")
-        if parts:
-            line = f"{title} (max {HOURS} h) : " + " · ".join(sorted(parts, key=str.lower))
+                put(sections[key], "• " + line)
+    for (dev, dname, title), members in blocks.items():  # lignes d'un bloc : à la suite, dans l'ordre configuré
+        for rank in sorted(members):
+            label, unit, series, mode, current, name = members[rank]
+            try:
+                line = block_line(label, unit, series, mode, current, name)
+            except Exception as e:
+                print(f"ligne ignorée {name} : {type(e).__name__}: {e}", file=sys.stderr)
+                continue
+            if not line:
+                continue
+            order = f"{title.lower()}\x00{rank:03d}"
             if dname and dev in det_devs:
-                det_groups[dname].append("  • " + line)
+                put(det_groups[dname], "  • " + line, order)
             elif dname:
-                groups[dname].append("  • " + line)
+                put(groups[dname], "  • " + line, order)
             else:
-                sections["📈 Capteurs"].append("• " + line)
-    sections["🔌 Switches / lumières"] += ["• " + l for l in dev_lines]
+                put(sections["📈 Capteurs"], "• " + line, order)
+    for l in dev_lines:
+        put(sections["🔌 Switches / lumières"], "• " + l)
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
     for key in ("📈 Capteurs", "🚨 Alertes", "🔌 Switches / lumières", DET):  # ordre fixe
-        body = sorted(sections.get(key, []), key=str.lower)
+        body = lines_of(sections.get(key, []))
         if key == DET:
             for dname in sorted(det_groups, key=str.lower):
-                body += [f"■ {dname}"] + sorted(det_groups[dname], key=str.lower)
+                body += [f"■ {dname}"] + lines_of(det_groups[dname])
         if body:
             text += f"\n\n{key}\n" + "\n".join(body)
     if groups:
         text += "\n\n🏠 Appareils"
         for dname in sorted(groups, key=str.lower):
-            text += f"\n■ {dname}\n" + "\n".join(sorted(groups[dname], key=str.lower))
+            text += f"\n■ {dname}\n" + "\n".join(lines_of(groups[dname]))
     if skipped:
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"

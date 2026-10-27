@@ -110,7 +110,7 @@ COMMANDS = [
     ("status", "État des services + data 4G"),
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA regroupés — /list <mot> : détail, /list all : toutes les entités"),
-    ("update", "Le résumé du matin, maintenant — /update all : état de tout"),
+    ("update", "Le résumé du matin, maintenant — /update all : tout, /update <mot> : ce qui contient le mot"),
     ("on", "Allumer un interrupteur : /on <nom de l'appareil>"),
     ("off", "Éteindre un interrupteur : /off <nom de l'appareil>"),
     ("launch", "Aspirateur : lancer l'aspiration standard — /launch <nom>"),
@@ -365,7 +365,9 @@ def handle(text, st, role="admin"):
                 return summary.list_flat_text()
             return summary.list_text(" ".join(parts[1:]) or None)
         if cmd == "/update":
-            return summary.all_states_text() if parts[1:2] == ["all"] else summary.build()
+            if parts[1:2] == ["all"]:
+                return summary.all_states_text()
+            return summary.all_states_text(" ".join(parts[1:])) if parts[1:] else summary.build()
     except Exception as e:
         return f"❌ Home Assistant : {e}"
     return f"❓ Commande inconnue : {text.split()[0] if parts else ''}\n\n" + HELP
