@@ -428,10 +428,10 @@ def block_line(label, unit, series, mode, current, name, eid):
     return f"{label} : max {peak[0]:g}{unit} à {hm(peak[1])}" if peak else None
 
 
-def range_text(series):
-    """« 15-15.8 » : plus bas et plus haut relevés d'une série numérique."""
+def range_text(series, unit=""):
+    """« 15°C-15.8°C » : plus bas et plus haut relevés d'une série numérique."""
     v = floats(series)
-    return f"{min(v):g}-{max(v):g}" if v else ""
+    return f"{min(v):g}{unit}-{max(v):g}{unit}" if v else ""
 
 
 def on_events(states):
@@ -718,7 +718,8 @@ def build():
                                 y = yesterday_total(eid2)
                                 text = f"{rule['label']} {y:g}{unit2} hier".strip() if y else "-"
                             else:
-                                text = range_text(to_celsius(hist.get(eid2, []), unit2)[0])
+                                series2, unit2 = to_celsius(hist.get(eid2, []), unit2)
+                                text = range_text(series2, unit2)
                         except Exception as e:  # l'annexe ne doit jamais faire échouer le résumé
                             print(f"annexe ignorée {eid2} : {type(e).__name__}: {e}", file=sys.stderr)
                             text = ""
