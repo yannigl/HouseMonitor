@@ -34,12 +34,13 @@ _SUM = CFG.get("summary", {})
 HIDE_NAMES = [norm(x) for x in _SUM.get("hide", [  # capteurs masqués : texte contenu dans le nom de l'entité
     "dewpoint", "hourly rain", "rain rate", "relative pressure", "solar lux", "solar radiation", "total rain",
     "vapour pressure deficit", "weekly rain", "yearly rain"])]
-# Blocs de lignes qui restent groupées, dans cet ordre : « max » = valeur maximale sur la fenêtre et son heure,
-# « current » = valeur actuelle seulement.
+# Blocs de lignes qui restent groupées, dans cet ordre. Modes : « line » = la ligne habituelle (variation et heures),
+# « max » = valeur maximale sur la fenêtre et son heure, « current » = valeur actuelle seulement,
+# « yesterday » = valeur maximale de la veille (minuit à minuit).
 BLOCKS = [{"title": b["title"], "lines": [{"match": norm(x["match"]), "mode": x.get("mode", "max")} for x in b["lines"]]}
           for b in _SUM.get("blocks", [{"title": "Wind", "lines": [
-              {"match": "wind speed", "mode": "max"}, {"match": "wind gust", "mode": "max"},
-              {"match": "max daily gust", "mode": "max"}, {"match": "wind direction", "mode": "current"}]}])]
+              {"match": "wind speed", "mode": "line"}, {"match": "wind gust", "mode": "line"},
+              {"match": "max daily gust", "mode": "yesterday"}, {"match": "wind direction", "mode": "line"}]}])]
 # Annexe affichée à côté d'un capteur principal du même appareil : mode « range » = plage entre parenthèses ; mode
 # « yesterday » = total de la veille (« Monthly Rain : 10.4mm (daily 1.5mm hier) », « (-) » s'il n'a pas plu).
 ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.get("label", ""), "mode": a.get("mode", "range")}
@@ -408,8 +409,13 @@ def yesterday_total(eid):
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"]
 
 
-def block_line(label, unit, series, mode, current, name):
-    """Une ligne d'un bloc (vent…) : « max » sur la fenêtre avec l'heure, ou la valeur « current »."""
+def block_line(label, unit, series, mode, current, name, eid):
+    """Une ligne d'un bloc (vent…) selon son mode : « line », « max », « current » ou « yesterday »."""
+    if mode == "line":
+        return numeric_line(label, unit, series)
+    if mode == "yesterday":
+        y = yesterday_total(eid)
+        return f"{label} (hier) : {y:g}{unit}" if y else f"{label} (hier) : -"
     if mode == "current":
         v = floats([current] if current else series[-1:])
         if not v:
@@ -707,7 +713,7 @@ def build():
                         annotations[eid] = (rule["mode"], rule["label"], text)
                         annexes.add(eid2)
                         break
-    blocks = defaultdict(dict)  # (appareil, nom, titre) -> {rang: (libellé, unité, série, mode, état actuel, nom)}
+    blocks = defaultdict(dict)  # (appareil, nom, titre) -> {rang: (libellé, unité, série, mode, état actuel, nom, entity_id)}
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
         if eid in absorbed or eid in annexes or any(h in norm(name) for h in HIDE_NAMES):
             continue
@@ -726,7 +732,7 @@ def build():
                          if ln["match"] in norm(name)), None)
             if slot and not is_battery(name):  # vent… : lignes regroupées, valeurs maximales de la fenêtre
                 title, rank, ln = slot
-                blocks[(dev or dname, dname, title)][rank] = (label, unit, series, ln["mode"], cur.get(eid), name)
+                blocks[(dev or dname, dname, title)][rank] = (label, unit, series, ln["mode"], cur.get(eid), name, eid)
                 continue
         try:  # une entité aux données inattendues ne doit pas faire échouer tout le résumé
             if dom == "sensor":
@@ -773,9 +779,9 @@ def build():
                 put(sections[key], "• " + line)
     for (dev, dname, title), members in blocks.items():  # lignes d'un bloc : à la suite, dans l'ordre configuré
         for rank in sorted(members):
-            label, unit, series, mode, current, name = members[rank]
+            label, unit, series, mode, current, name, eid = members[rank]
             try:
-                line = block_line(label, unit, series, mode, current, name)
+                line = block_line(label, unit, series, mode, current, name, eid)
             except Exception as e:
                 print(f"ligne ignorée {name} : {type(e).__name__}: {e}", file=sys.stderr)
                 continue

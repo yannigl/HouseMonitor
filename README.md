@@ -119,8 +119,10 @@ ou `systemd-journal` (`groups`).
   correspondant en entier) :
   - `hide` : capteurs masqués, par texte contenu dans le nom (défaut : dewpoint, hourly rain, rain rate, relative pressure, solar lux,
     solar radiation, total rain, vapour pressure deficit, weekly rain, yearly rain) ;
-  - `blocks` : lignes gardées **à la suite**, dans l'ordre. Défaut : `Wind Speed : max 23.4km/h à 21h41`, `Wind Gust : max …`,
-    `Max Daily Gust : max …`, `Wind Direction : 169° (S)` (« max » = maximum sur la fenêtre et son heure, « current » = valeur actuelle) ;
+  - `blocks` : lignes gardées **à la suite**, dans l'ordre. Défaut : `Wind Speed`, `Wind Gust` et `Wind Direction` avec leur ligne
+    habituelle (variation, heures, valeur actuelle), puis `Max Daily Gust (hier) : 43.9km/h` (maximum de la veille, minuit à minuit ;
+    `-` s'il n'y a pas de relevé). Modes : `line` (ligne habituelle), `max` (maximum de la fenêtre et son heure), `current` (valeur
+    actuelle, avec la lettre cardinale pour une direction en °), `yesterday` (maximum de la veille) ;
   - `annotate` : capteur annexe affiché à côté d'un capteur principal du même appareil. Défaut : `Indoor Temperature (dew point) : … (15-15.8)`
     (plage) et `Monthly Rain : 10.4mm (daily 1.5mm hier)`, ou `(-)` s'il n'a pas plu hier (mode `yesterday`).
   Exemple : `"summary": {"hide": ["solar lux"], "blocks": [{"title": "Wind", "lines": [{"match": "wind speed", "mode": "max"}]}],
