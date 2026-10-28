@@ -133,11 +133,11 @@ COMMANDS = [
 
 # Droits : le chat privé du propriétaire (telegram_chat_id) a tous les droits. Dans un groupe de « telegram_groups »,
 # « telegram_admins » ont tous les droits et « telegram_members » seulement ceux-ci ; les autres sont ignorés sans réponse.
-GROUPS = {int(g) for g in CFG.get("telegram_groups", [])}
-ADMINS = {int(u) for u in CFG.get("telegram_admins", [])}
+GROUPS = set(id_list(CFG.get("telegram_groups")))
+ADMINS = set(id_list(CFG.get("telegram_admins")))
 if CHAT_ID.lstrip("-").isdigit() and int(CHAT_ID) > 0:
     ADMINS.add(int(CHAT_ID))  # un chat privé a pour identifiant celui de l'utilisateur : le propriétaire est administrateur partout
-MEMBERS = {int(u) for u in CFG.get("telegram_members", [])}
+MEMBERS = set(id_list(CFG.get("telegram_members")))
 MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "launch", "send", "pause", "id"}
 
 
