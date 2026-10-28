@@ -111,6 +111,9 @@ ou `systemd-journal` (`groups`).
   affiche son état (`armé` / `désarmé`) et ses changements sur la fenêtre.
 - **Aspirateur** (appareil ayant une entité `vacuum.*`, ex. Roomba) : seule la ligne « Total missions » est toujours affichée,
   avec `(-)` si elle n'a pas varié ; les autres lignes n'apparaissent que si leur valeur a changé sur 24 h.
+- **Section « 📡 Data »** : les volumes de données du routeur 4G (Downloaded/Uploaded data, issus des débits) sont rangés dans leur propre
+  section, non dans « Appareils ». Elle est suivie de « 🧮 Calcul data Pi » (data du script et du Pi depuis le début du cycle, comme `/data`),
+  qui est maintenant aussi dans `/update`.
 - **Débits (KiB/s, Mbit/s…)** : au lieu de la vitesse, le résumé donne le **volume** échangé sur la fenêtre (intégrale des relevés
   du débit, donc approximatif) et le **pic** avec son heure : `Downloaded data : ≈ 1,20 Go sur 24 h · pic de download 222 KiB/s à 14h52` (idem `Uploaded data` / `pic d'upload`).
 - **Rattacher une entité à un bloc** : `"summary": {"attach": {"input_boolean.motion_sensor_armed": "Mezzanine motion detector"}}`

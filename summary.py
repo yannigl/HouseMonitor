@@ -653,6 +653,15 @@ def undervoltage_events(hours=24):
     return out
 
 
+def pi_data_text():
+    """Calcul de la data du Pi (script et total depuis le début du cycle), sous son propre en-tête. Vide si illisible."""
+    try:
+        return "\n\n🧮 Calcul data Pi\n" + data_block()
+    except Exception as e:  # le compteur de data ne doit jamais empêcher le résumé
+        print(f"calcul data Pi impossible : {type(e).__name__}: {e}", file=sys.stderr)
+        return ""
+
+
 def power_text():
     """Ligne « alimentation du Pi » : nombre d'alertes de sous-tension sur la fenêtre. Vide si rien n'est lisible
     (autre machine que le Pi, journal inaccessible)."""
@@ -704,6 +713,7 @@ def build():
     vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
     groups = defaultdict(list)  # appareil -> ses lignes
     det_groups = defaultdict(list)  # appareil de détection -> ses lignes
+    data_groups = defaultdict(list)  # appareil (routeur 4G…) -> ses lignes de volume de données
     DET = "🛡 Détecteurs / caméras"
     # capteur annexe affiché à côté d'un capteur principal du même appareil (plage, ou total de la veille)
     annotations, annexes = {}, set()
@@ -753,6 +763,9 @@ def build():
                     line = battery_line(label, unit, series)  # rien au-dessus du seuil, ⚠️ en dessous
                 elif unit in RATE_BYTES:
                     line = traffic_line(label, unit, series)  # volume (intégrale du débit) et pic, plutôt que la vitesse
+                    if line:  # rangé dans la section « Data », pas dans l'appareil
+                        put(data_groups[dname or ""], ("  • " if dname else "• ") + line)
+                        continue
                 else:
                     note = annotations.get(eid)
                     if note and note[0] == "yesterday":  # « Monthly Rain : 10.4mm (daily 1.5mm hier) » / « (-) »
@@ -821,11 +834,15 @@ def build():
         text += "\n\n🏠 Appareils"
         for dname in sorted(groups, key=str.lower):
             text += f"\n■ {dname}\n" + "\n".join(lines_of(groups[dname]))
+    if data_groups:  # volumes échangés par le routeur 4G, puis le calcul de data du Pi
+        text += "\n\n📡 Data"
+        for dname in sorted(data_groups, key=str.lower):
+            text += (f"\n■ {dname}" if dname else "") + "\n" + "\n".join(lines_of(data_groups[dname]))
     if skipped:
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
                  f"{'s' if len(skipped) > 1 else ''} (données illisibles, détail dans run.log) : {shown}")
-    return text + power_text()
+    return text + pi_data_text() + power_text()
 
 
 def send(text):
@@ -860,29 +877,20 @@ def _send_to(chat_id, text):
             time.sleep(SEND_RETRY_DELAY)
 
 
-def net_line():
-    return "\n\n" + data_block()
-
-
 def main():
     try:
         git_bytes = int(os.environ.get("GIT_BYTES") or 0)  # fourni par run.sh
     except ValueError:
         git_bytes = 0
     if "--dry" in sys.argv:
-        print(build() + net_line())
+        print(build())
         return
     if not load_state()["monitor"]:
         heartbeat()  # le script a bien tourné, il est juste en pause (/stop monitor)
         log_net("summary", git_bytes)
         return
     try:
-        try:
-            footer = net_line()
-        except Exception:  # le compteur de data ne doit jamais empêcher le résumé
-            footer = ""
-            traceback.print_exc()
-        send(build() + footer)
+        send(build())
     except Exception:
         err = traceback.format_exc()
         print(err, file=sys.stderr)
