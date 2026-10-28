@@ -40,7 +40,7 @@ import smsfwd
 import control
 import summary
 import vacuum
-from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, load_state, log_net,
+from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, id_list, load_state, log_net,
                     pi_cum, reset_cycle, save_state)
 
 TOKEN = CFG["telegram_token"]

@@ -1,6 +1,7 @@
 """Partagé entre summary.py et listener.py : config, état, compteur data, heartbeat."""
 import calendar
 import json
+import re
 import sys
 import unicodedata
 import urllib.request
@@ -29,6 +30,17 @@ SERVICES = ("listener", "ping", "monitor")
 def norm(s):
     """Minuscules sans accents, pour comparer « Déshumidificateur Entrée » et « deshumidificateur entree »."""
     return "".join(c for c in unicodedata.normalize("NFKD", str(s or "")) if not unicodedata.combining(c)).casefold().strip()
+
+
+def id_list(value):
+    """Identifiants Telegram numériques depuis config.json : accepte une liste, un nombre, ou une chaîne (« 123 » ou « 123, 456 »).
+    Une chaîne n'est jamais parcourue caractère par caractère."""
+    if value is None:
+        return []
+    if isinstance(value, (int, float)):
+        return [int(value)]
+    items = re.split(r"[,\s;]+", value.strip()) if isinstance(value, str) else list(value)
+    return [int(str(x)) for x in items if str(x).strip().lstrip("-").isdigit()]
 
 
 def load_state():

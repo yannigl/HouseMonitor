@@ -20,7 +20,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-from common import CFG, count, data_block, fmt_bytes, heartbeat, load_state, log_net, norm
+from common import CFG, count, data_block, fmt_bytes, heartbeat, id_list, load_state, log_net, norm
 
 HA = CFG.get("ha_url", "http://127.0.0.1:8123")
 AUTH = {"Authorization": f"Bearer {CFG['ha_token']}"}
@@ -855,7 +855,7 @@ def send(text, owner_only=False):
     """Envoie au chat du propriétaire, puis aux chats de « telegram_notify_chats » (un groupe, par exemple), sauf `owner_only`.
     Seul un échec vers le chat du propriétaire est une erreur : un groupe injoignable ne bloque rien."""
     primary = str(CFG["telegram_chat_id"])
-    others = [] if owner_only else [str(c) for c in CFG.get("telegram_notify_chats", []) if str(c) != primary]
+    others = [] if owner_only else [str(c) for c in id_list(CFG.get("telegram_notify_chats")) if str(c) != primary]
     for chat in [primary] + others:
         try:
             _send_to(chat, text)
