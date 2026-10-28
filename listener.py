@@ -138,7 +138,7 @@ ADMINS = set(id_list(CFG.get("telegram_admins")))
 if CHAT_ID.lstrip("-").isdigit() and int(CHAT_ID) > 0:
     ADMINS.add(int(CHAT_ID))  # un chat privé a pour identifiant celui de l'utilisateur : le propriétaire est administrateur partout
 MEMBERS = set(id_list(CFG.get("telegram_members")))
-MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "launch", "send", "pause", "id"}
+MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "on", "off", "launch", "send", "pause", "id"}
 
 
 def sender_role(chat_id, user_id):
@@ -154,8 +154,8 @@ def sender_role(chat_id, user_id):
 
 
 def member_allows(cmd, args):
-    """Un membre peut lire, armer et piloter l'aspirateur ; jamais désarmer, éteindre, remettre la data à zéro, ni /on, /off,
-    /rearm, /git, /stop, /start."""
+    """Un membre peut lire, armer, allumer/éteindre un interrupteur (/on, /off : control.exclude s'applique) et piloter l'aspirateur ;
+    jamais désarmer, éteindre le Pi, remettre la data à zéro, ni /rearm, /git, /restart, /stop, /start."""
     if cmd.lstrip("/") not in MEMBER_COMMANDS:
         return False
     return not (cmd == "/data" and args[:1] == ["reset"])

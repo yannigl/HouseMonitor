@@ -207,8 +207,8 @@ démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart hous
    "telegram_notify_chats": []
    ```
    - `telegram_chat_id` (votre chat privé avec le bot) garde **tous** les droits ; `telegram_admins` : tous les droits, y compris dans le groupe.
-   - `telegram_members` : `/update`, `/list`, `/state`, `/stale`, `/status`, `/data`, `/arm`, `/launch`, `/send`, `/pause`, `/help`, `/id`.
-     **Refusés** : `/disarm` (et `/unarm`), `/shutdown`, `/data reset`, `/on`, `/off`, `/rearm`, `/git`, `/restart`, `/stop`, `/start`.
+   - `telegram_members` : `/update`, `/list`, `/state`, `/stale`, `/status`, `/data`, `/arm`, `/on`, `/off`, `/launch`, `/send`, `/pause`, `/help`, `/id`.
+     **Refusés** : `/disarm` (et `/unarm`), `/shutdown`, `/data reset`, `/rearm`, `/git`, `/restart`, `/stop`, `/start`.
    - Les autres utilisateurs du groupe sont ignorés sans réponse, comme les commandes adressées à un autre bot et les messages qui ne sont pas des commandes.
    - `telegram_notify_chats` : chats qui reçoivent aussi tous les messages sortants du bot (résumé du matin, alertes, fin de ménage…). Vide par défaut.
 4. `/restart` dans votre chat privé (ou `sudo systemctl restart housemonitor-listener`) : la configuration n'est lue qu'au démarrage.
