@@ -230,7 +230,7 @@ def _select(which, gs, resolved, states, states_list):
     return found if isinstance(found, str) else [found]
 
 
-def act(arm, which):
+def act(arm, which, chat_id=None):
     """/arm ou /disarm. `which` : "all", un groupe, un nom d'appareil, éventuellement suivi d'une durée, ou None (aide)."""
     gs = groups()
     if not which or not gs:
@@ -272,7 +272,8 @@ def act(arm, which):
         if seconds and changed:
             prev = {e: origin.get(e, states.get(e, "?")) for e in changed}
             timers = _load_timers()
-            timers.append({"label": which, "arm": arm, "seconds": seconds, "until": time.time() + seconds, "prev": prev})
+            timers.append({"label": which, "arm": arm, "seconds": seconds, "until": time.time() + seconds, "prev": prev,
+                           "chat": chat_id})  # chat d'où la commande est partie : le message de fin y sera aussi envoyé
             _save_timers(timers)
     for label, ok, done, problems, failed, notes in results:
         out.append(f"\n• {label} ({len(ok)} entité{'s' if len(ok) > 1 else ''})")
@@ -334,7 +335,7 @@ def run_timers(poll=15):
                 if due:
                     _save_timers([t for t in timers if t not in due])  # retirée d'abord : jamais restaurée deux fois
             for t in due:
-                summary.send(_restore_one(t))
+                summary.send(_restore_one(t), also=[t.get("chat")])
         except Exception as e:
             import sys
             print(f"minuteries KO : {type(e).__name__}: {e}", file=sys.stderr, flush=True)

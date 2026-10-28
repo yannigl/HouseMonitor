@@ -851,12 +851,17 @@ def build():
     return text + power_text()
 
 
-def send(text, owner_only=False):
-    """Envoie au chat du propriétaire, puis aux chats de « telegram_notify_chats » (un groupe, par exemple), sauf `owner_only`.
+def send(text, owner_only=False, also=None):
+    """Envoie au chat du propriétaire, puis aux chats `also` (celui d'où une commande a été lancée : suites d'une commande dans un
+    groupe), puis à ceux de « telegram_notify_chats » (sauf `owner_only`, qui n'écrit qu'au propriétaire).
     Seul un échec vers le chat du propriétaire est une erreur : un groupe injoignable ne bloque rien."""
     primary = str(CFG["telegram_chat_id"])
-    others = [] if owner_only else [str(c) for c in id_list(CFG.get("telegram_notify_chats")) if str(c) != primary]
-    for chat in [primary] + others:
+    chats = [primary]
+    if not owner_only:
+        for c in [*(also or []), *id_list(CFG.get("telegram_notify_chats"))]:
+            if c is not None and str(c) not in chats:
+                chats.append(str(c))
+    for chat in chats:
         try:
             _send_to(chat, text)
         except Exception as e:

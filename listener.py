@@ -298,7 +298,7 @@ def status_text(st):
             f"{data_compact()}")
 
 
-def handle(text, st, role="admin"):
+def handle(text, st, role="admin", chat_id=None):
     parts = text.lower().split()
     cmd = parts[0].split("@")[0] if parts else ""
     args = parts[1:]
@@ -354,9 +354,9 @@ def handle(text, st, role="admin"):
         if cmd == "/rearm":
             return alerts.rearm()
         if cmd in vacuum.ACTIONS:
-            return vacuum.act(cmd, " ".join(parts[1:]) or None)
+            return vacuum.act(cmd, " ".join(parts[1:]) or None, chat_id)
         if cmd in ("/arm", "/disarm", "/unarm"):  # /unarm : alias de /disarm
-            return arm.act(cmd == "/arm", " ".join(parts[1:]) or None)
+            return arm.act(cmd == "/arm", " ".join(parts[1:]) or None, chat_id)
         if cmd == "/stale":
             try:
                 hours = float(parts[1]) if parts[1:2] else 24.0
@@ -401,7 +401,7 @@ def handle_message(msg, bot_username=None):
         print(f"commande refusée ({cmd}) : membre {user_id}", flush=True)
         return ("⛔ Cette commande est réservée aux administrateurs.", None, chat_id)
     print(f"commande reçue ({role}, chat {chat_id}, utilisateur {user_id}) : {text[:40]}", flush=True)
-    out = handle(text, load_state(), role)
+    out = handle(text, load_state(), role, chat_id)
     reply, after = out if isinstance(out, tuple) else (out, None)
     return reply, after, chat_id
 

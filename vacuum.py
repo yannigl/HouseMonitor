@@ -39,7 +39,7 @@ def usage():
     return "\n".join(lines)
 
 
-def act(cmd, query):
+def act(cmd, query, chat_id=None):
     service, done = ACTIONS[cmd]
     words = norm(query or "").split()
     if cmd == "/send" and words and words[-1] in ("home", "base", "maison"):
@@ -83,7 +83,7 @@ def act(cmd, query):
     if err == "(2e essai)":
         text += "\n↻ réussi au 2e essai (le 1er avait échoué)"
     if cmd == "/launch":
-        watch(eid, _name(s))
+        watch(eid, _name(s), chat_id)
         text += "\n👀 Je vous préviens ici en cas d'erreur, de bac plein et à la fin du ménage."
     return text
 
@@ -92,7 +92,7 @@ def act(cmd, query):
 WATCH_EVERY = 20          # s entre deux lectures de HA (local : aucune data 4G)
 WATCH_MAX = 4 * 3600      # s : on arrête de suivre un robot qui ne finit jamais
 NOT_STARTED_AFTER = 300   # s : prévenir si le robot n'est toujours pas parti
-WATCHING = set()          # un seul suivi par aspirateur
+WATCHING = {}             # un seul suivi par aspirateur : entity_id -> chats où écrire en plus du propriétaire
 
 
 def _read(eid):
@@ -125,6 +125,11 @@ def details(attrs):
     return lines
 
 
+def _say(eid, text):
+    """Message de suivi : au propriétaire, et au chat d'où le robot a été lancé (un groupe, par exemple)."""
+    summary.send(text, also=sorted(WATCHING.get(eid, ())))
+
+
 def _watch(eid, name):
     """Après /launch : prévient par Telegram du démarrage manqué, d'une erreur, du bac plein et de la fin du ménage."""
     try:
@@ -138,27 +143,29 @@ def _watch(eid, name):
             if state == "cleaning":
                 started = True
             if not started and time.time() - t0 > NOT_STARTED_AFTER:
-                summary.send(f"⚠️ {name} n'a pas démarré (état : {STATE_FR.get(state, state)})\n" + "\n".join(details(attrs)))
+                _say(eid, f"⚠️ {name} n'a pas démarré (état : {STATE_FR.get(state, state)})\n" + "\n".join(details(attrs)))
                 return
             err = _error(attrs)
             if err and ("error", err) not in flagged:
                 flagged.add(("error", err))
-                summary.send(f"⚠️ {name} : erreur « {err} »")
+                _say(eid, f"⚠️ {name} : erreur « {err} »")
             if attrs.get("bin_full") is True and "bin" not in flagged:
                 flagged.add("bin")
-                summary.send(f"🗑 {name} : le bac est plein, il faut le vider.")
+                _say(eid, f"🗑 {name} : le bac est plein, il faut le vider.")
             if started and state in ("docked", "idle"):
-                summary.send(f"🧹 {name} a terminé (état : {STATE_FR.get(state, state)})\n" + "\n".join(details(attrs)))
+                _say(eid, f"🧹 {name} a terminé (état : {STATE_FR.get(state, state)})\n" + "\n".join(details(attrs)))
                 return
-        summary.send(f"⚠️ {name} : toujours pas terminé après {WATCH_MAX // 3600} h, je cesse de le suivre.")
+        _say(eid, f"⚠️ {name} : toujours pas terminé après {WATCH_MAX // 3600} h, je cesse de le suivre.")
     except Exception as e:
         print(f"suivi aspirateur KO : {type(e).__name__}: {e}", flush=True)
     finally:
-        WATCHING.discard(eid)
+        WATCHING.pop(eid, None)
 
 
-def watch(eid, name):
-    if eid in WATCHING:
+def watch(eid, name, chat_id=None):
+    if eid in WATCHING:  # déjà suivi : on ajoute seulement le chat de cette commande
+        if chat_id is not None:
+            WATCHING[eid].add(chat_id)
         return
-    WATCHING.add(eid)
+    WATCHING[eid] = {chat_id} if chat_id is not None else set()
     threading.Thread(target=_watch, args=(eid, name), daemon=True, name="vacuum-watch").start()

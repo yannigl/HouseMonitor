@@ -210,6 +210,9 @@ démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart hous
    - `telegram_members` : `/update`, `/list`, `/state`, `/stale`, `/status`, `/data`, `/arm`, `/on`, `/off`, `/launch`, `/send`, `/pause`, `/help`, `/id`.
      **Refusés** : `/disarm` (et `/unarm`), `/shutdown`, `/data reset`, `/rearm`, `/git`, `/restart`, `/stop`, `/start`.
    - Les autres utilisateurs du groupe sont ignorés sans réponse, comme les commandes adressées à un autre bot et les messages qui ne sont pas des commandes.
+   - **Les suites d'une commande lancée dans le groupe y reviennent aussi** : réponse immédiate, fin de ménage, bac plein ou erreur de Roomba
+     après `/launch`, message de fin d'un `/arm` ou `/disarm` avec durée. Votre chat privé les reçoit toujours aussi ; le groupe ne reçoit rien
+     des commandes lancées en privé, sauf s'il est dans `telegram_notify_chats`.
    - `telegram_notify_chats` : chats qui reçoivent aussi tous les messages sortants du bot (résumé du matin, alertes, fin de ménage…). Vide par défaut.
 4. `/restart` dans votre chat privé (ou `sudo systemctl restart housemonitor-listener`) : la configuration n'est lue qu'au démarrage.
 
