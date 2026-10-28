@@ -173,6 +173,78 @@ exactement ce nom. `/on` seul liste les appareils pilotables.
 exacts ou préfixes à **ne jamais** piloter. Mettez-y tout ce dont l'arrêt à distance serait gênant : la prise du routeur ou
 du Pi, du congélateur… Comme pour toute commande, seul votre `telegram_chat_id` est écouté.
 
+### Piloter l'aspirateur (`/launch`, `/send`, `/pause`)
+`/launch Roomba` lance l'aspiration standard, `/send Roomba home` le renvoie à sa base, `/pause Roomba` le met en pause. Le nom est cherché
+dans les entités `vacuum.*` (sans casse ni accents) ; avec un seul aspirateur il est facultatif ; ambigu -> rien n'est actionné. Le bot
+attend jusqu'à 15 s que le robot réagisse avant de signaler un échec, et répond « rien à faire » s'il est déjà dans l'état demandé.
+Après `/launch`, il suit le robot (lecture locale de HA toutes les 20 s) et écrit sur Telegram : erreur, **bac plein ou absent**, robot qui
+ne démarre pas (5 min), et un récapitulatif à la fin (durée, surface, bac, batterie). Les textes viennent des attributs de l'intégration
+Roomba de HA (`bin_full`, `error`, `cleaning_time`…), pas des notifications de l'appli iRobot, que HA ne relaie pas.
+
+### Chercher des mesures (`/update <mot>`) et voir une entité (`/state`)
+`/update` donne le résumé, `/update all` tout, et `/update température` (ou `/update zzz`) **toutes** les entités dont le nom, l'entity_id,
+l'appareil, le modèle ou la pièce contient le mot (plusieurs mots : tous doivent y être), regroupées par appareil, indisponibles comprises.
+Quelques mots français courants cherchent aussi l'anglais : température, humidité, pression, vent, pluie, batterie, bruit, rafale, tension,
+puissance, énergie, courant, mouvement. `/state living room camera` affiche l'état, la date du dernier changement et les attributs (jusqu'à
+12 entités ; jetons d'accès et adresses d'image masqués) : utile sans accès à Developer tools de HA.
+
+### Mettre à jour et redémarrer depuis Telegram (`/git pull`, `/restart`)
+`/git pull` exécute `git pull --ff-only origin <branche courante>` dans le dépôt du Pi et répond avec les nouveaux commits (seule cette
+commande est permise). Le listener redémarre seul quand un fichier `.py` a changé, **après vérification que tout le code se compile** : sinon
+il garde l'ancienne version et vous prévient. `/restart` (administrateurs) relance le listener pour relire `config.json` (lu seulement au
+démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart housemonitor-listener`.
+
+### Utiliser le bot dans un groupe Telegram
+1. Créez le groupe, ajoutez le bot comme membre. Dans BotFather, `/setjoingroups` doit autoriser les groupes ; laissez le **mode confidentialité**
+   actif (le bot ne reçoit alors que les commandes adressées à lui : tapez `/commande@nom_du_bot`, ou choisissez la commande dans le menu `/`).
+2. Dans le groupe, envoyez `/id@nom_du_bot` : réponse avec l'identifiant du groupe (négatif) et le vôtre ; chaque membre peut le faire. Les
+   messages ignorés (non autorisés) sont aussi écrits dans le journal : `journalctl -u housemonitor-listener -n 40`.
+3. Dans `config.json` :
+   ```json
+   "telegram_groups": [-5371954972],
+   "telegram_admins": [111111111],
+   "telegram_members": [222222222],
+   "telegram_notify_chats": []
+   ```
+   - `telegram_chat_id` (votre chat privé avec le bot) garde **tous** les droits ; `telegram_admins` : tous les droits, y compris dans le groupe.
+   - `telegram_members` : `/update`, `/list`, `/state`, `/stale`, `/status`, `/data`, `/arm`, `/launch`, `/send`, `/pause`, `/help`, `/id`.
+     **Refusés** : `/disarm` (et `/unarm`), `/shutdown`, `/data reset`, `/on`, `/off`, `/rearm`, `/git`, `/restart`, `/stop`, `/start`.
+   - Les autres utilisateurs du groupe sont ignorés sans réponse, comme les commandes adressées à un autre bot et les messages qui ne sont pas des commandes.
+   - `telegram_notify_chats` : chats qui reçoivent aussi tous les messages sortants du bot (résumé du matin, alertes, fin de ménage…). Vide par défaut.
+4. `/restart` dans votre chat privé (ou `sudo systemctl restart housemonitor-listener`) : la configuration n'est lue qu'au démarrage.
+
+### SMS reçus par le routeur : transmission à Telegram (`smsfwd.py`, dans le listener)
+Pour qu'aucun SMS envoyé au routeur ne soit perdu quand vous n'êtes pas là. Un thread du listener lit la boîte de réception du routeur et
+envoie chaque nouveau SMS dans votre chat Telegram privé (`📩 SMS de Maman (+336…) — date` puis le texte). **Indépendant de la page web** :
+elle peut être arrêtée ou ne pas exister.
+- `config.json` : `"smsfwd": {"enabled": true, "poll_seconds": 300, "to_notify_chats": false, "skip": []}` (en plus du bloc `sms` du routeur).
+  `poll_seconds` (60 au minimum) est aussi le délai avant Telegram ; chaque lecture se connecte au routeur (son interface web est alors
+  déconnectée si elle est ouverte). `to_notify_chats` : aussi les groupes de `telegram_notify_chats`. `skip` : mots (expéditeur ou texte) qui
+  empêchent la transmission, ex. `["code", "otp"]` : les SMS passent par les serveurs de Telegram, filtrez ceux qui contiennent des codes de
+  confirmation.
+- Rien n'est marqué lu ni supprimé sur le routeur. Au premier lancement, l'historique de la boîte n'est pas transmis. Au plus 5 messages par
+  lecture (le reste à la lecture suivante) ; un échec Telegram est retenté. Un SMS reçu pendant une panne du Pi reste dans la boîte du
+  routeur et est transmis au redémarrage.
+- Les messages sont aussi gardés dans `sms_inbox.json` (500 derniers, ignoré par git) ; le résultat de la dernière lecture est dans `sms_poll.json`.
+- Test de la lecture sans afficher les messages : `python3 routersms.py --probe-inbox`.
+- Reprend les anciens réglages `smsweb.forward_telegram`, `forward_to_notify_chats`, `forward_skip` et `poll_seconds` s'il n'y a pas de bloc `smsfwd`.
+
+### Page web locale pour envoyer des SMS (`smsweb.py`)
+Une page (réseau local seulement, **sans mot de passe**, par choix) pour que la famille envoie des SMS à des contacts enregistrés depuis la
+maison. Programme et service **séparés** du listener, dans le même dépôt ; il partage `routersms.py` et le verrou du routeur (un seul
+administrateur à la fois : le bot et la page passent l'un après l'autre).
+- `config.json` : `"smsweb": {"port": 8081, "host": "0.0.0.0", "max_per_day": 10, "show_inbox": true, "contacts": [{"name": "Marie",
+  "number": "+33612345678"}]}`. Plafond de 10 envois par jour pour la page, **séparé** de celui des alertes du bot (5).
+- Installation : `sed "s#/home/pi#$HOME#; s#User=pi#User=$USER#" housemonitor-smsweb.service | sudo tee /etc/systemd/system/housemonitor-smsweb.service`,
+  puis `sudo systemctl daemon-reload && sudo systemctl enable --now housemonitor-smsweb` (démarre avec le Pi). La page :
+  `http://<adresse-du-Pi>:8081`. Il se relance seul après un `git pull` (si le code se compile).
+- Envoi : seulement vers un contact de la liste (jamais un numéro saisi à la main), avec confirmation.
+- La page **ne lit pas le routeur** : elle affiche les messages reçus d'après `sms_inbox.json`, écrit par `smsfwd`. `"show_inbox": false` masque
+  les messages reçus (la page ne propose alors que l'envoi) : à préférer si des enfants l'utilisent, puisque les SMS reçus peuvent contenir des
+  codes de confirmation.
+- Sans mot de passe, tout appareil du réseau local peut envoyer (dans la limite du plafond). N'ouvrez jamais ce port sur internet. Une page
+  tierce ne peut pas déclencher d'envoi : les requêtes d'envoi exigent un en-tête propre à la page et une origine identique.
+
 ### Armement (`/arm`, `/disarm`)
 (Dans ce README, les menus de Home Assistant sont donnés avec leurs noms anglais.)
 `/arm all` met en marche les caméras et détecteurs que **vous** listez dans `config.json`, par groupes ; `/disarm` (alias
