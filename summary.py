@@ -653,13 +653,16 @@ def undervoltage_events(hours=24):
     return out
 
 
-def pi_data_text():
-    """Calcul de la data du Pi (script et total depuis le début du cycle), sous son propre en-tête. Vide si illisible."""
+def pi_data_lines():
+    """Calcul de la data du Pi (script et total depuis le début du cycle), présenté comme un appareil de la section Data :
+    « ■ Calcul data Pi » puis ses lignes en sous-puces. Liste vide si illisible."""
     try:
-        return "\n\n🧮 Calcul data Pi\n" + data_block()
+        raw = data_block().splitlines()
     except Exception as e:  # le compteur de data ne doit jamais empêcher le résumé
         print(f"calcul data Pi impossible : {type(e).__name__}: {e}", file=sys.stderr)
-        return ""
+        return []
+    items = [raw[0].lstrip("📡 ").strip()] + [l.lstrip("• ").strip() for l in raw[1:]] if raw else []
+    return ["■ Calcul data Pi"] + [f"  • {i}" for i in items]
 
 
 def power_text():
@@ -834,15 +837,18 @@ def build():
         text += "\n\n🏠 Appareils"
         for dname in sorted(groups, key=str.lower):
             text += f"\n■ {dname}\n" + "\n".join(lines_of(groups[dname]))
-    if data_groups:  # volumes échangés par le routeur 4G, puis le calcul de data du Pi
+    pi_lines = pi_data_lines()
+    if data_groups or pi_lines:  # volumes du routeur 4G, puis le calcul de data du Pi : mêmes en-têtes et sous-puces, sans ligne vide
         text += "\n\n📡 Data"
         for dname in sorted(data_groups, key=str.lower):
             text += (f"\n■ {dname}" if dname else "") + "\n" + "\n".join(lines_of(data_groups[dname]))
+        if pi_lines:
+            text += "\n" + "\n".join(pi_lines)
     if skipped:
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
                  f"{'s' if len(skipped) > 1 else ''} (données illisibles, détail dans run.log) : {shown}")
-    return text + pi_data_text() + power_text()
+    return text + power_text()
 
 
 def send(text):
