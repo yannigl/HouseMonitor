@@ -175,20 +175,41 @@ def send(text, to=None, bucket="alerts"):
         return False, f"{type(e).__name__}: {e}"
 
 
+AMOUNTS = (8, 10, 5)  # « amountPerPage » : la page du routeur l'envoie avec la lecture ; sa valeur est dans une autre partie de son code
+
+
+def _read_page(router, page, amount):
+    return router.call(2, {"pageNumber": page, "amountPerPage": amount, "box": 0})  # box 0 = reçus (page du routeur)
+
+
 def read_inbox(max_pages=10):
     """Lit la boîte de réception du routeur, sans rien marquer ni supprimer.
     -> (ok, messages ou détail) ; chaque message : {"index", "from", "content", "receivedTime", "unread"}."""
     out, seen = [], set()
     try:
         with router_session() as router:
-            for page in range(1, max_pages + 1):
-                r = router.call(2, {"box": 0, "pageNumber": page})  # box 0 = reçus, comme dans le code de la page du routeur
+            amount, first, last_error = None, None, None
+            for candidate in AMOUNTS:  # la 1re valeur acceptée par le routeur sert pour toutes les pages
+                try:
+                    first = _read_page(router, 1, candidate)
+                    amount = candidate
+                    break
+                except RuntimeError as e:  # réponse illisible : valeur refusée
+                    last_error = e
+            if amount is None:
+                raise last_error
+            page, r = 1, first
+            while True:
                 batch = r.get("messageList") or []
                 fresh = [m for m in batch if m.get("index") not in seen]
                 if not fresh:
                     break  # page vide, ou le routeur répète la dernière page
                 seen.update(m.get("index") for m in fresh)
                 out += fresh
+                page += 1
+                if page > max_pages or len(batch) < amount:
+                    break
+                r = _read_page(router, page, amount)
     except RouterBusy as e:
         return False, str(e)
     except Exception as e:
@@ -199,9 +220,8 @@ def read_inbox(max_pages=10):
 def probe_inbox_variants():
     """Essaie plusieurs formes de la requête de lecture dans UNE seule session et décrit les réponses (structure seulement,
     jamais le texte des messages). -> lignes de texte."""
-    variants = [("box+pageNumber", {"box": 0, "pageNumber": 1}), ("pageNumber seul", {"pageNumber": 1}),
-                ("readMessage imbriqué", {"readMessage": {"box": 0, "pageNumber": 1}}),
-                ("boxType+pageNumber", {"boxType": 0, "pageNumber": 1}), ("page+box", {"box": 0, "page": 1})]
+    variants = [(f"amountPerPage={n}", {"pageNumber": 1, "amountPerPage": n, "box": 0}) for n in (8, 10, 5, 20)]
+    variants.append(("sans amountPerPage", {"pageNumber": 1, "box": 0}))
     out = []
     with router_session() as router:
         for label, data in variants:
