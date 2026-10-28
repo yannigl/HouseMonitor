@@ -135,6 +135,8 @@ COMMANDS = [
 # « telegram_admins » ont tous les droits et « telegram_members » seulement ceux-ci ; les autres sont ignorés sans réponse.
 GROUPS = {int(g) for g in CFG.get("telegram_groups", [])}
 ADMINS = {int(u) for u in CFG.get("telegram_admins", [])}
+if CHAT_ID.lstrip("-").isdigit() and int(CHAT_ID) > 0:
+    ADMINS.add(int(CHAT_ID))  # un chat privé a pour identifiant celui de l'utilisateur : le propriétaire est administrateur partout
 MEMBERS = {int(u) for u in CFG.get("telegram_members", [])}
 MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "launch", "send", "pause", "id"}
 
@@ -417,6 +419,8 @@ def loop():
     signature = code_signature()
     warned = None
     print("listener démarré", flush=True)
+    print(f"Telegram : chat privé {CHAT_ID} · groupes autorisés {sorted(GROUPS)} · administrateurs {sorted(ADMINS)} · membres {sorted(MEMBERS)}",
+          flush=True)
     arm.start_timers()  # retour automatique des /arm et /disarm temporaires
     smsfwd.start()  # thread : SMS reçus par le routeur -> Telegram, indépendant de la page smsweb
     alerts.start()  # thread : première alerte du jour de chaque détecteur (si « alerts » est configuré)
