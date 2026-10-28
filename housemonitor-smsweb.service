@@ -8,6 +8,9 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/HouseMonitor
 ExecStart=/usr/bin/python3 /home/pi/HouseMonitor/smsweb.py
+# Autorise l'écoute sur le port 80 (privilégié) sans lancer le programme en root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=30
 

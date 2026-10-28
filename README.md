@@ -238,6 +238,11 @@ administrateur à la fois : le bot et la page passent l'un après l'autre).
 - Installation : `sed "s#/home/pi#$HOME#; s#User=pi#User=$USER#" housemonitor-smsweb.service | sudo tee /etc/systemd/system/housemonitor-smsweb.service`,
   puis `sudo systemctl daemon-reload && sudo systemctl enable --now housemonitor-smsweb` (démarre avec le Pi). La page :
   `http://<adresse-du-Pi>:8081`. Il se relance seul après un `git pull` (si le code se compile).
+- **Port 80** (pour ne pas avoir à saisir de port : `http://<adresse-du-Pi>`) : le fichier de service autorise l'écoute sur ce port privilégié sans
+  lancer le programme en root (`AmbientCapabilities=CAP_NET_BIND_SERVICE`). Dans cet ordre : réinstallez le fichier de service (commande `sed … |
+  sudo tee …` ci-dessus) puis `sudo systemctl daemon-reload`, mettez `"port": 80` dans `smsweb`, puis `sudo systemctl restart housemonitor-smsweb`.
+  Vérifiez d'abord que rien d'autre n'écoute sur le port 80 : `sudo ss -ltnp | grep ':80 '`. Sur Raspberry Pi OS, `http://<nom-du-Pi>.local`
+  (ex. `http://raspi4.local`) fonctionne aussi sur la plupart des appareils ; une adresse IP fixe (réservation DHCP dans le routeur) évite que l'adresse change.
 - Envoi : seulement vers un contact de la liste (jamais un numéro saisi à la main), avec confirmation.
 - La page **ne lit pas le routeur** : elle affiche les messages reçus d'après `sms_inbox.json`, écrit par `smsfwd`. `"show_inbox": false` masque
   les messages reçus (la page ne propose alors que l'envoi) : à préférer si des enfants l'utilisent, puisque les SMS reçus peuvent contenir des

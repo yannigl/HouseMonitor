@@ -200,7 +200,13 @@ def main():
     if not CONTACTS:
         print("smsweb : aucun contact dans config.json → smsweb.contacts (l'envoi sera désactivé)", file=sys.stderr, flush=True)
     threading.Thread(target=watch_code, args=(code_signature(),), daemon=True, name="watch").start()
-    server = ThreadingHTTPServer((BIND, PORT), Handler)
+    try:
+        server = ThreadingHTTPServer((BIND, PORT), Handler)
+    except PermissionError:
+        sys.exit(f"smsweb : le port {PORT} est privilégié. Sous systemd, installez la version à jour de housemonitor-smsweb.service "
+                 "(AmbientCapabilities=CAP_NET_BIND_SERVICE), ou choisissez un port ≥ 1024 (smsweb.port).")
+    except OSError as e:
+        sys.exit(f"smsweb : impossible d'écouter sur {BIND}:{PORT} ({e}). Un autre programme utilise peut-être ce port : sudo ss -ltnp | grep ':{PORT} '")
     print(f"smsweb : http://{BIND}:{PORT} ({len(CONTACTS)} contact(s), {routersms.LIMITS['web']()} envois par jour max)", flush=True)
     server.serve_forever()
 
