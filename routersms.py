@@ -79,7 +79,11 @@ class Router:
 
     def call(self, action, data=None):
         body = json.dumps({"module": "message", "action": action, **(data or {})})
-        return json.loads(self._req(self.base + "lteWebCfg", body))
+        raw = self._req(self.base + "lteWebCfg", body)
+        try:
+            return json.loads(raw)
+        except ValueError:
+            raise RuntimeError(f"réponse du routeur illisible (action {action}) : {raw[:120]!r}")
 
     def logout(self):
         try:
@@ -192,7 +196,32 @@ def read_inbox(max_pages=10):
     return True, out
 
 
+def probe_inbox_variants():
+    """Essaie plusieurs formes de la requête de lecture dans UNE seule session et décrit les réponses (structure seulement,
+    jamais le texte des messages). -> lignes de texte."""
+    variants = [("box+pageNumber", {"box": 0, "pageNumber": 1}), ("pageNumber seul", {"pageNumber": 1}),
+                ("readMessage imbriqué", {"readMessage": {"box": 0, "pageNumber": 1}}),
+                ("boxType+pageNumber", {"boxType": 0, "pageNumber": 1}), ("page+box", {"box": 0, "page": 1})]
+    out = []
+    with router_session() as router:
+        for label, data in variants:
+            try:
+                r = router.call(2, data)
+                lst = r.get("messageList")
+                out.append(f"{label} : clés {sorted(r)}" + (f", {len(lst)} message(s)" if isinstance(lst, list) else ""))
+            except Exception as e:
+                out.append(f"{label} : {type(e).__name__}: {e}")
+    return out
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--probe-inbox-variants"]:
+        try:
+            print("\n".join(probe_inbox_variants()))
+        except Exception as e:
+            print(f"❌ {type(e).__name__}: {e}")
+            sys.exit(1)
+        sys.exit(0)
     if sys.argv[1:2] == ["--probe-inbox"]:  # structure de la boîte de réception, sans afficher les messages
         ok, res = read_inbox()
         if not ok:
