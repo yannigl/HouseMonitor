@@ -48,6 +48,9 @@
     "host": "0.0.0.0",
     "max_per_day": 10,
     "poll_seconds": 300,
+    "forward_telegram": true,
+    "forward_to_notify_chats": false,
+    "forward_skip": [],
     "contacts": []
   },
   "alerts": {

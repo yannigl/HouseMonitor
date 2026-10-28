@@ -6,6 +6,10 @@ config.json -> "smsweb": {"port": 8081, "host": "0.0.0.0", "max_per_day": 10, "p
     séparé de celui des alertes du bot) ;
   - réception : la boîte du routeur est lue toutes les `poll_seconds` s (une connexion au routeur à chaque lecture : un seul
     administrateur à la fois, voir routersms.py) ; les messages sont gardés dans sms_inbox.json (ignoré par git) ;
+  - chaque nouveau SMS est aussi transmis au chat Telegram du propriétaire (`forward_telegram`, vrai par défaut ;
+    `forward_to_notify_chats` pour le groupe aussi ; `forward_skip` : mots qui empêchent la transmission, par exemple
+    ["code", "otp"] pour que les codes de confirmation ne passent pas par Telegram). Les SMS restent « non lus » sur la page :
+    rien n'est marqué lu sur le routeur ;
   - aucun mot de passe, par choix : à utiliser sur le réseau local seulement, ne jamais l'ouvrir sur internet. Les SMS reçus
     (codes de confirmation compris) sont visibles par tout appareil du réseau local ;
   - se relance tout seul quand un .py du dépôt change (après vérification que le code se compile).
@@ -22,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 import routersms
+import summary
 from common import CFG, HERE
 
 CONF = CFG.get("smsweb", {})
@@ -30,6 +35,10 @@ BIND = CONF.get("host", "0.0.0.0")
 POLL = max(60, CONF.get("poll_seconds", 300))
 CONTACTS = [c for c in CONF.get("contacts", []) if c.get("name") and c.get("number")]
 INBOX_FILE = HERE / "sms_inbox.json"
+FORWARD = CONF.get("forward_telegram", True)          # transmettre les nouveaux SMS à Telegram
+FORWARD_ALL = CONF.get("forward_to_notify_chats", False)  # aussi aux chats de telegram_notify_chats (sinon : le propriétaire seul)
+FORWARD_SKIP = [w.lower() for w in CONF.get("forward_skip", [])]  # mots (expéditeur ou texte) : jamais transmis, visibles ici seulement
+FORWARD_MAX = 5     # messages transmis par lecture : au-delà, la suite à la lecture suivante (pas de rafale)
 KEEP = 500          # messages gardés
 MIN_REFRESH = 30    # s entre deux lectures du routeur déclenchées depuis la page
 LOCK = threading.Lock()
@@ -47,20 +56,47 @@ def msg_key(m):
     return hashlib.sha1(f"{m.get('from')}|{m.get('receivedTime')}|{m.get('content')}".encode()).hexdigest()[:16]
 
 
+def forward_pending():
+    """Transmet à Telegram les messages arrivés depuis la dernière lecture (marqués « fwd »: False), sans rien marquer sur le
+    routeur : ils restent « non lus » sur la page. Un échec d'envoi laisse le message en attente pour la lecture suivante."""
+    inbox = load_inbox()
+    sent = 0
+    for m in sorted((m for m in inbox if m.get("fwd") is False), key=lambda m: str(m.get("receivedTime"))):
+        blob = f"{m.get('from')} {m.get('content')}".lower()
+        if any(w in blob for w in FORWARD_SKIP):
+            m["fwd"] = "ignoré"
+            continue
+        if sent >= FORWARD_MAX:
+            break
+        who = name_of(m.get("from"))
+        head = f"📩 SMS de {who} ({m.get('from')})" if who else f"📩 SMS de {m.get('from')}"
+        try:
+            summary.send(f"{head} — {m.get('receivedTime')}\n{str(m.get('content'))[:3500]}", owner_only=not FORWARD_ALL)
+        except Exception as e:
+            print(f"transmission Telegram KO : {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+            break
+        m["fwd"] = True
+        sent += 1
+    INBOX_FILE.write_text(json.dumps(inbox, ensure_ascii=False))
+    return sent
+
+
 def poll():
-    """Lit la boîte du routeur et ajoute les nouveaux messages au fichier local. -> (ok, détail)."""
+    """Lit la boîte du routeur et ajoute les nouveaux messages au fichier local, puis les transmet à Telegram. -> (ok, détail)."""
     with LOCK:
         STATE["last_poll"] = time.time()
         ok, res = routersms.read_inbox()
         if not ok:
             STATE.update(ok=False, detail=res)
             return False, res
+        first = not INBOX_FILE.exists()  # premier lancement : l'historique existant n'est pas transmis à Telegram
         known = load_inbox()
         keys = {m["key"] for m in known}
-        new = [{**m, "key": msg_key(m)} for m in res if msg_key(m) not in keys]
-        if new:
+        new = [{**m, "key": msg_key(m), "fwd": first or not FORWARD} for m in res if msg_key(m) not in keys]
+        if new or first:
             INBOX_FILE.write_text(json.dumps((known + new)[-KEEP:], ensure_ascii=False))
-        STATE.update(ok=True, detail=f"{len(new)} nouveau(x) message(s)")
+        sent = forward_pending() if FORWARD else 0
+        STATE.update(ok=True, detail=f"{len(new)} nouveau(x) message(s)" + (f", {sent} transmis à Telegram" if sent else ""))
         return True, STATE["detail"]
 
 
