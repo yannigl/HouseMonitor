@@ -47,11 +47,14 @@
     "port": 8081,
     "host": "0.0.0.0",
     "max_per_day": 10,
-    "poll_seconds": 300,
-    "forward_telegram": true,
-    "forward_to_notify_chats": false,
-    "forward_skip": [],
+    "show_inbox": true,
     "contacts": []
+  },
+  "smsfwd": {
+    "enabled": true,
+    "poll_seconds": 300,
+    "to_notify_chats": false,
+    "skip": []
   },
   "alerts": {
     "armed_by": "input_boolean.motion_sensor_armed",

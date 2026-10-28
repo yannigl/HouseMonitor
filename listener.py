@@ -36,6 +36,7 @@ from pathlib import Path
 
 import alerts
 import arm
+import smsfwd
 import control
 import summary
 import vacuum
@@ -417,6 +418,7 @@ def loop():
     warned = None
     print("listener démarré", flush=True)
     arm.start_timers()  # retour automatique des /arm et /disarm temporaires
+    smsfwd.start()  # thread : SMS reçus par le routeur -> Telegram, indépendant de la page smsweb
     alerts.start()  # thread : première alerte du jour de chaque détecteur (si « alerts » est configuré)
     try:  # menu "/" de Telegram ; ~0,6 Ko, une fois au démarrage
         tg.call("setMyCommands", commands=json.dumps([{"command": c, "description": d} for c, d in COMMANDS]))

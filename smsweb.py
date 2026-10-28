@@ -1,21 +1,16 @@
-"""Page web locale pour envoyer et recevoir des SMS par le routeur 4G (TL-MR6400), indépendante de Telegram.
+"""Page web locale pour envoyer des SMS par le routeur 4G (TL-MR6400) depuis la maison, indépendante de Telegram.
 
-config.json -> "smsweb": {"port": 8081, "host": "0.0.0.0", "max_per_day": 10, "poll_seconds": 300,
+config.json -> "smsweb": {"port": 8081, "host": "0.0.0.0", "max_per_day": 10, "show_inbox": true,
                           "contacts": [{"name": "Marie", "number": "+33612345678"}]}
   - envoi : seulement vers un contact enregistré (jamais un numéro saisi), `max_per_day` envois par jour (compteur « web »,
     séparé de celui des alertes du bot) ;
-  - réception : la boîte du routeur est lue toutes les `poll_seconds` s (une connexion au routeur à chaque lecture : un seul
-    administrateur à la fois, voir routersms.py) ; les messages sont gardés dans sms_inbox.json (ignoré par git) ;
-  - chaque nouveau SMS est aussi transmis au chat Telegram du propriétaire (`forward_telegram`, vrai par défaut ;
-    `forward_to_notify_chats` pour le groupe aussi ; `forward_skip` : mots qui empêchent la transmission, par exemple
-    ["code", "otp"] pour que les codes de confirmation ne passent pas par Telegram). Les SMS restent « non lus » sur la page :
-    rien n'est marqué lu sur le routeur ;
-  - aucun mot de passe, par choix : à utiliser sur le réseau local seulement, ne jamais l'ouvrir sur internet. Les SMS reçus
-    (codes de confirmation compris) sont visibles par tout appareil du réseau local ;
+  - cette page ne lit PAS le routeur : la boîte de réception est lue par smsfwd.py (dans le listener), qui transmet aussi les SMS à
+    Telegram, même si cette page est arrêtée. La page affiche seulement le fichier sms_inbox.json que smsfwd écrit ;
+    `"show_inbox": false` masque les messages reçus sur la page (par exemple pour que les enfants n'y voient que l'envoi) ;
+  - aucun mot de passe, par choix : à utiliser sur le réseau local seulement, ne jamais l'ouvrir sur internet ;
   - se relance tout seul quand un .py du dépôt change (après vérification que le code se compile).
 Lancement : python3 smsweb.py  (service : housemonitor-smsweb.service)
 """
-import hashlib
 import json
 import os
 import subprocess
@@ -26,108 +21,26 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 import routersms
-import summary
+import smsstore
 from common import CFG, HERE
 
 CONF = CFG.get("smsweb", {})
 PORT = CONF.get("port", 8081)
 BIND = CONF.get("host", "0.0.0.0")
-POLL = max(60, CONF.get("poll_seconds", 300))
-CONTACTS = [c for c in CONF.get("contacts", []) if c.get("name") and c.get("number")]
-INBOX_FILE = HERE / "sms_inbox.json"
-FORWARD = CONF.get("forward_telegram", True)          # transmettre les nouveaux SMS à Telegram
-FORWARD_ALL = CONF.get("forward_to_notify_chats", False)  # aussi aux chats de telegram_notify_chats (sinon : le propriétaire seul)
-FORWARD_SKIP = [w.lower() for w in CONF.get("forward_skip", [])]  # mots (expéditeur ou texte) : jamais transmis, visibles ici seulement
-FORWARD_MAX = 5     # messages transmis par lecture : au-delà, la suite à la lecture suivante (pas de rafale)
-KEEP = 500          # messages gardés
-MIN_REFRESH = 30    # s entre deux lectures du routeur déclenchées depuis la page
-LOCK = threading.Lock()
-STATE = {"last_poll": 0.0, "ok": None, "detail": "pas encore lu"}
-
-
-def load_inbox():
-    try:
-        return json.loads(INBOX_FILE.read_text())
-    except (OSError, ValueError):
-        return []
-
-
-def msg_key(m):
-    return hashlib.sha1(f"{m.get('from')}|{m.get('receivedTime')}|{m.get('content')}".encode()).hexdigest()[:16]
-
-
-def forward_pending():
-    """Transmet à Telegram les messages arrivés depuis la dernière lecture (marqués « fwd »: False), sans rien marquer sur le
-    routeur : ils restent « non lus » sur la page. Un échec d'envoi laisse le message en attente pour la lecture suivante."""
-    inbox = load_inbox()
-    sent = 0
-    for m in sorted((m for m in inbox if m.get("fwd") is False), key=lambda m: str(m.get("receivedTime"))):
-        blob = f"{m.get('from')} {m.get('content')}".lower()
-        if any(w in blob for w in FORWARD_SKIP):
-            m["fwd"] = "ignoré"
-            continue
-        if sent >= FORWARD_MAX:
-            break
-        who = name_of(m.get("from"))
-        head = f"📩 SMS de {who} ({m.get('from')})" if who else f"📩 SMS de {m.get('from')}"
-        try:
-            summary.send(f"{head} — {m.get('receivedTime')}\n{str(m.get('content'))[:3500]}", owner_only=not FORWARD_ALL)
-        except Exception as e:
-            print(f"transmission Telegram KO : {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-            break
-        m["fwd"] = True
-        sent += 1
-    INBOX_FILE.write_text(json.dumps(inbox, ensure_ascii=False))
-    return sent
-
-
-def poll():
-    """Lit la boîte du routeur et ajoute les nouveaux messages au fichier local, puis les transmet à Telegram. -> (ok, détail)."""
-    with LOCK:
-        STATE["last_poll"] = time.time()
-        ok, res = routersms.read_inbox()
-        if not ok:
-            STATE.update(ok=False, detail=res)
-            return False, res
-        first = not INBOX_FILE.exists()  # premier lancement : l'historique existant n'est pas transmis à Telegram
-        known = load_inbox()
-        keys = {m["key"] for m in known}
-        new = [{**m, "key": msg_key(m), "fwd": first or not FORWARD} for m in res if msg_key(m) not in keys]
-        if new or first:
-            INBOX_FILE.write_text(json.dumps((known + new)[-KEEP:], ensure_ascii=False))
-        sent = forward_pending() if FORWARD else 0
-        STATE.update(ok=True, detail=f"{len(new)} nouveau(x) message(s)" + (f", {sent} transmis à Telegram" if sent else ""))
-        return True, STATE["detail"]
-
-
-def poll_loop():
-    time.sleep(5)
-    while True:
-        try:
-            poll()
-        except Exception as e:  # ne jamais arrêter la lecture périodique
-            STATE.update(ok=False, detail=f"{type(e).__name__}: {e}")
-        time.sleep(POLL)
-
-
-def name_of(number):
-    """Nom du contact dont le numéro se termine par les mêmes 9 chiffres."""
-    tail = "".join(ch for ch in str(number) if ch.isdigit())[-9:]
-    for c in CONTACTS:
-        if tail and "".join(ch for ch in c["number"] if ch.isdigit())[-9:] == tail:
-            return c["name"]
-    return None
+SHOW_INBOX = CONF.get("show_inbox", True)
+CONTACTS = smsstore.contacts()
 
 
 def api_state():
-    msgs = sorted(load_inbox(), key=lambda m: str(m.get("receivedTime")), reverse=True)[:200]
+    msgs = sorted(smsstore.load_inbox(), key=lambda m: str(m.get("receivedTime")), reverse=True)[:200] if SHOW_INBOX else []
     return {
         "contacts": [{"name": c["name"], "number": c["number"]} for c in CONTACTS],
         "sent_today": routersms.sent_today("web"),
         "limit": routersms.LIMITS["web"](),
-        "inbox": [{"from": m.get("from"), "name": name_of(m.get("from")), "content": m.get("content"),
+        "show_inbox": SHOW_INBOX,
+        "inbox": [{"from": m.get("from"), "name": smsstore.name_of(m.get("from")), "content": m.get("content"),
                    "time": m.get("receivedTime"), "unread": bool(m.get("unread"))} for m in msgs],
-        "poll": {"ok": STATE["ok"], "detail": STATE["detail"], "at": STATE["last_poll"], "every": POLL},
+        "poll": smsstore.read_status(),
     }
 
 
@@ -151,10 +64,11 @@ PAGE = """<!doctype html>
 <div class="small"><span id="count">0</span>/300 · <span id="quota"></span></div>
 <button id="send">Envoyer</button>
 <div id="result" class="small"></div>
+<div id="received">
 <h2>Reçus</h2>
 <div class="small" id="poll"></div>
-<button id="refresh" style="width:auto;padding:.4rem .9rem">Relire la boîte maintenant</button>
 <div id="inbox"></div>
+</div>
 <script>
 const $ = id => document.getElementById(id);
 const H = {"Content-Type": "application/json", "X-SMSWeb": "1"};
@@ -168,8 +82,9 @@ async function load(){
     if (cur) sel.value = cur;
     $("quota").textContent = s.sent_today + " envoyé(s) aujourd'hui sur " + s.limit;
     $("send").disabled = !s.contacts.length || s.sent_today >= s.limit;
+    $("received").style.display = s.show_inbox ? "" : "none";
     const p = s.poll;
-    $("poll").textContent = (p.ok === false ? "Dernière lecture en erreur : " : "Dernière lecture " + fmt(p.at) + " : ") + p.detail + " · relecture automatique toutes les " + Math.round(p.every/60) + " min";
+    $("poll").textContent = (p.ok === false ? "Dernière lecture en erreur : " : "Dernière lecture " + fmt(p.at) + " : ") + p.detail + (p.every ? " · relecture toutes les " + Math.round(p.every/60) + " min" : "");
     $("poll").className = "small " + (p.ok === false ? "ko" : "");
     const box = $("inbox"); box.innerHTML = "";
     if (!s.inbox.length) box.innerHTML = '<div class="small">Aucun message reçu.</div>';
@@ -194,11 +109,6 @@ $("send").addEventListener("click", async () => {
     if (r.ok) { $("text").value = ""; $("count").textContent = 0; }
   } catch(e) { $("result").className = "small ko"; $("result").textContent = "❌ " + e; }
   load();
-});
-$("refresh").addEventListener("click", async () => {
-  $("refresh").disabled = true;
-  try { await fetch("/api/refresh", {method: "POST", headers: H}); } catch(e) {}
-  $("refresh").disabled = false; load();
 });
 load(); setInterval(load, 30000);
 </script></body></html>
@@ -259,11 +169,6 @@ class Handler(BaseHTTPRequestHandler):
             print(f"envoi demandé à {contact['name']} ({len(text)} caractères)", flush=True)
             ok, detail = routersms.send(text, contact["number"], bucket="web")
             return self._json({"ok": ok, "detail": detail})
-        if path == "/api/refresh":
-            if time.time() - STATE["last_poll"] < MIN_REFRESH:
-                return self._json({"ok": False, "detail": "lecture trop récente, réessayez dans un instant"})
-            ok, detail = poll()
-            return self._json({"ok": ok, "detail": detail})
         self._json({"error": "introuvable"}, 404)
 
     def log_message(self, fmt, *args):  # pas de ligne de journal par requête (la page se rafraîchit toute seule)
@@ -294,7 +199,6 @@ def watch_code(signature):
 def main():
     if not CONTACTS:
         print("smsweb : aucun contact dans config.json → smsweb.contacts (l'envoi sera désactivé)", file=sys.stderr, flush=True)
-    threading.Thread(target=poll_loop, daemon=True, name="poll").start()
     threading.Thread(target=watch_code, args=(code_signature(),), daemon=True, name="watch").start()
     server = ThreadingHTTPServer((BIND, PORT), Handler)
     print(f"smsweb : http://{BIND}:{PORT} ({len(CONTACTS)} contact(s), {routersms.LIMITS['web']()} envois par jour max)", flush=True)
