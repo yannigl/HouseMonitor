@@ -124,8 +124,8 @@ ou `systemd-journal` (`groups`).
     solar radiation, total rain, vapour pressure deficit, weekly rain, yearly rain, feels like) ;
   - `blocks` : lignes gardées **à la suite**, dans l'ordre. Défaut : `Wind Speed`, `Wind Gust` et `Wind Direction` avec leur ligne
     habituelle (variation, heures, valeur actuelle), puis `Max Daily Gust (hier) : 43.9km/h` (maximum de la veille, minuit à minuit ;
-    `-` s'il n'y a pas de relevé). Modes : `line` (ligne habituelle), `max` (maximum de la fenêtre et son heure), `current` (valeur
-    actuelle, avec la lettre cardinale pour une direction en °), `yesterday` (maximum de la veille) ;
+    `-` s'il n'y a pas de relevé), **seulement si cette valeur diffère de celle d'avant-hier** (mode `yesterday_changed`). Modes : `line` (ligne habituelle), `max` (maximum de la fenêtre et son heure), `current` (valeur
+    actuelle, avec la lettre cardinale pour une direction en °), `yesterday` (maximum de la veille), `yesterday_changed` (idem, seulement s'il a changé par rapport à l'avant-veille) ;
   - `order` : groupes de capteurs affichés à la suite, dans l'ordre. Défaut : `Monthly Rain` puis `Event Rain` ;
   - `hide_if_zero` : lignes masquées quand leur valeur est nulle. Défaut : `[{"match": "event rain", "when": "current"}]` (« Event Rain » absent
     quand sa valeur actuelle est 0 mm ; `"when": "window"` : seulement s'il vaut 0 pendant toutes les 24 h) ;

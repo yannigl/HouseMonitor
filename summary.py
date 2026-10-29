@@ -36,11 +36,11 @@ HIDE_NAMES = [norm(x) for x in _SUM.get("hide", [  # capteurs masqués : texte c
     "vapour pressure deficit", "weekly rain", "yearly rain", "feels like"])]
 # Blocs de lignes qui restent groupées, dans cet ordre. Modes : « line » = la ligne habituelle (variation et heures),
 # « max » = valeur maximale sur la fenêtre et son heure, « current » = valeur actuelle seulement,
-# « yesterday » = valeur maximale de la veille (minuit à minuit).
+# « yesterday » = valeur maximale de la veille (minuit à minuit), « yesterday_changed » = idem, seulement si elle diffère de celle d'avant-hier.
 BLOCKS = [{"title": b["title"], "lines": [{"match": norm(x["match"]), "mode": x.get("mode", "max")} for x in b["lines"]]}
           for b in _SUM.get("blocks", [{"title": "Wind", "lines": [
               {"match": "wind speed", "mode": "line"}, {"match": "wind gust", "mode": "line"},
-              {"match": "max daily gust", "mode": "yesterday"}, {"match": "wind direction", "mode": "line"}]}])]
+              {"match": "max daily gust", "mode": "yesterday_changed"}, {"match": "wind direction", "mode": "line"}]}])]
 # Lignes masquées quand leur valeur est nulle : « current » = valeur actuelle à 0, « window » = 0 pendant toute la fenêtre.
 HIDE_ZERO = [{"match": norm(h["match"]), "when": h.get("when", "current")}
              for h in _SUM.get("hide_if_zero", [{"match": "event rain", "when": "current"}])]
@@ -409,12 +409,16 @@ def peak_of(series):
     return max(pts, key=lambda p: p[0]) if pts else None
 
 
-def yesterday_total(eid):
-    """Plus haute valeur d'un compteur journalier hier (de minuit à minuit), ou None s'il n'a rien relevé ou valait 0."""
+def day_max(eid, days_ago=1):
+    """Plus haute valeur d'un compteur journalier un jour donné (de minuit à minuit ; 1 = hier), ou None sans relevé ni valeur > 0."""
     today0 = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-    series = history([eid], today0 - timedelta(days=1), today0).get(eid, [])
+    series = history([eid], today0 - timedelta(days=days_ago), today0 - timedelta(days=days_ago - 1)).get(eid, [])
     v = floats(series)
     return max(v) if v and max(v) > 0 else None
+
+
+def yesterday_total(eid):
+    return day_max(eid, 1)
 
 
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"]
@@ -424,6 +428,11 @@ def block_line(label, unit, series, mode, current, name, eid):
     """Une ligne d'un bloc (vent…) selon son mode : « line », « max », « current » ou « yesterday »."""
     if mode == "line":
         return numeric_line(label, unit, series)
+    if mode == "yesterday_changed":  # la valeur d'hier, seulement si elle diffère de celle de la veille d'hier
+        y, before = day_max(eid, 1), day_max(eid, 2)
+        if y == before:
+            return None
+        return f"{label} (hier) : {y:g}{unit}" if y else f"{label} (hier) : -"
     if mode == "yesterday":
         y = yesterday_total(eid)
         return f"{label} (hier) : {y:g}{unit}" if y else f"{label} (hier) : -"
