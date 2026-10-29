@@ -215,8 +215,8 @@ démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart hous
    "telegram_notify_chats": []
    ```
    - `telegram_chat_id` (votre chat privé avec le bot) garde **tous** les droits ; `telegram_admins` : tous les droits, y compris dans le groupe.
-   - `telegram_members` : `/update`, `/list`, `/state`, `/stale`, `/status`, `/data`, `/arm`, `/on`, `/off`, `/launch`, `/send`, `/pause`, `/help`, `/id`.
-     **Refusés** : `/disarm` (et `/unarm`), `/shutdown`, `/data reset`, `/rearm`, `/git`, `/restart`, `/stop`, `/start`.
+   - `telegram_members` : `/update`, `/list`, `/state`, `/stale`, `/status`, `/data`, `/arm`, `/on`, `/off`, `/heating`, `/away`, `/launch`, `/send`, `/pause`, `/help`, `/id`.
+     **Refusés** : `/disarm` (et `/unarm`), `/home`, `/shutdown`, `/data reset`, `/rearm`, `/git`, `/restart`, `/stop`, `/start`.
    - Les autres utilisateurs du groupe sont ignorés sans réponse, comme les commandes adressées à un autre bot et les messages qui ne sont pas des commandes.
    - **Les suites d'une commande lancée dans le groupe y reviennent aussi** : réponse immédiate, fin de ménage, bac plein ou erreur de Roomba
      après `/launch`, message de fin d'un `/arm` ou `/disarm` avec durée. Votre chat privé les reçoit toujours aussi ; le groupe ne reçoit rien
@@ -265,6 +265,16 @@ administrateur à la fois : le bot et la page passent l'un après l'autre).
   silencieux de l'appareil s'appliquent, et un SMS n'apparaît qu'à la prochaine lecture de la boîte du routeur par `smsfwd` (`poll_seconds`, 300 s par défaut).
 - Sans mot de passe, tout appareil du réseau local peut envoyer (dans la limite du plafond). N'ouvrez jamais ce port sur internet. Une page
   tierce ne peut pas déclencher d'envoi : les requêtes d'envoi exigent un en-tête propre à la page et une origine identique.
+
+### Chauffage Netatmo (`/heating`, `/away`, `/home`)
+- `/heating on` met le chauffage en **position normale** (le programme de la maison : preset `schedule` de HA), `/heating away` en position **absent**
+  (température plus basse : preset `away`). `/heating` seul affiche l'état des thermostats et les thermostats trouvés dans HA.
+- `/away` = `/arm all` **puis** `/heating away` ; `/home` = `/disarm all` **puis** `/heating on` (les deux réponses sont envoyées à la suite).
+- `config.json` : `"heating": {"entities": ["climate.living_room"]}`. **Une entité par maison suffit** : les modes de Netatmo s'appliquent à la
+  maison entière, et l'API de Netatmo limite le nombre d'appels. Si vous avez plusieurs maisons dans Netatmo, ne listez que celles qui doivent suivre
+  ces commandes. Sans entité configurée, rien n'est actionné. Le preset est choisi parmi `preset_modes` de l'entité ; s'il n'y est pas, rien n'est envoyé
+  et la liste disponible est affichée. La réponse relit l'état 3 s après l'ordre.
+- Droits dans le groupe : `/heating` et `/away` sont permis aux membres ; `/home` (qui désarme) est réservé aux administrateurs.
 
 ### Armement (`/arm`, `/disarm`)
 (Dans ce README, les menus de Home Assistant sont donnés avec leurs noms anglais.)

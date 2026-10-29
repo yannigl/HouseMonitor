@@ -108,22 +108,22 @@ def find_device(query, states_list, resolved):
 RETRY_DELAY = 3  # s avant le 2e essai d'un appel en erreur 5xx ou réseau (turn_on/turn_off sont idempotents)
 
 
-def call_service(domain, service, entity_ids):
-    """Appelle un service HA, avec un 2e essai si l'erreur est interne (5xx) ou réseau.
-    Retourne None si OK, "(2e essai)" si le 2e essai a réussi, sinon le message d'erreur."""
-    err = _call_once(domain, service, entity_ids)
+def call_service(domain, service, entity_ids, data=None):
+    """Appelle un service HA (`data` : paramètres en plus de l'entité, ex. {"preset_mode": "away"}), avec un 2e essai si l'erreur
+    est interne (5xx) ou réseau. Retourne None si OK, "(2e essai)" si le 2e essai a réussi, sinon le message d'erreur."""
+    err = _call_once(domain, service, entity_ids, data)
     if err and (err.startswith("HTTP 5") or err.startswith(("URLError", "OSError", "TimeoutError", "ConnectionError"))):
         time.sleep(RETRY_DELAY)
-        err2 = _call_once(domain, service, entity_ids)
+        err2 = _call_once(domain, service, entity_ids, data)
         return "(2e essai)" if err2 is None else err2
     return err
 
 
-def _call_once(domain, service, entity_ids):
+def _call_once(domain, service, entity_ids, data=None):
     try:
         summary.http(f"{summary.HA}/api/services/{domain}/{service}",
                      {**summary.AUTH, "Content-Type": "application/json"},
-                     json.dumps({"entity_id": entity_ids}).encode())
+                     json.dumps({"entity_id": entity_ids, **(data or {})}).encode())
         return None
     except urllib.error.HTTPError as e:
         try:
@@ -133,8 +133,8 @@ def _call_once(domain, service, entity_ids):
         if e.code >= 500 and not msg:  # HA n'envoie pas de détail pour une erreur interne
             msg = ("erreur interne de Home Assistant (l'intégration a échoué) : "
                    "docker logs --since 5m homeassistant, or Developer tools → Actions")
-            if domain == "camera":
-                msg += (". Pour une caméra Netatmo, c'est souvent la limite d'API de Netatmo (erreur 429 « Too Many Requests » "
+            if domain in ("camera", "climate"):
+                msg += (". Pour un appareil Netatmo, c'est souvent la limite d'API de Netatmo (erreur 429 « Too Many Requests » "
                         "dans le journal) : réessayez dans quelques minutes")
         return f"HTTP {e.code} {msg}".strip()
     except Exception as e:

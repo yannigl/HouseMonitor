@@ -38,6 +38,7 @@ import alerts
 import arm
 import smsfwd
 import control
+import heating
 import summary
 import vacuum
 from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, id_list, load_state, log_net,
@@ -121,6 +122,9 @@ COMMANDS = [
     ("git", "Mettre à jour le code du Pi : /git pull"),
     ("restart", "Redémarrer le listener (relit config.json), sans passer par systemd"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
+    ("heating", "Chauffage Netatmo : /heating on (normal) · /heating away (absent, plus bas)"),
+    ("away", "Absent : tout armer + chauffage en position absent"),
+    ("home", "De retour : tout désarmer + chauffage en position normale (administrateurs)"),
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
     ("disarm", "Désarmer : /disarm all, /disarm <groupe> ou /disarm <appareil> (alias /unarm)"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
@@ -138,7 +142,7 @@ ADMINS = set(id_list(CFG.get("telegram_admins")))
 if CHAT_ID.lstrip("-").isdigit() and int(CHAT_ID) > 0:
     ADMINS.add(int(CHAT_ID))  # un chat privé a pour identifiant celui de l'utilisateur : le propriétaire est administrateur partout
 MEMBERS = set(id_list(CFG.get("telegram_members")))
-MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "on", "off", "launch", "send", "pause", "id"}
+MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "on", "off", "heating", "away", "launch", "send", "pause", "id"}
 
 
 def sender_role(chat_id, user_id):
@@ -353,6 +357,12 @@ def handle(text, st, role="admin", chat_id=None):
             return git_pull()
         if cmd == "/rearm":
             return alerts.rearm()
+        if cmd == "/heating":
+            return heating.act(args[0] if args else None, chat_id)
+        if cmd == "/away":  # absent : tout armer, chauffage en position « absent »
+            return arm.act(True, "all", chat_id) + "\n\n" + heating.act("away", chat_id)
+        if cmd == "/home":  # de retour : tout désarmer, chauffage en position normale
+            return arm.act(False, "all", chat_id) + "\n\n" + heating.act("on", chat_id)
         if cmd in vacuum.ACTIONS:
             return vacuum.act(cmd, " ".join(parts[1:]) or None, chat_id)
         if cmd in ("/arm", "/disarm", "/unarm"):  # /unarm : alias de /disarm
