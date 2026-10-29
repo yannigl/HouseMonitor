@@ -665,6 +665,7 @@ def pi_data_lines():
         print(f"calcul data Pi impossible : {type(e).__name__}: {e}", file=sys.stderr)
         return []
     items = [raw[0].lstrip("📡 ").strip()] + [l.lstrip("• ").strip() for l in raw[1:]] if raw else []
+    items = [i for i in items if not i.startswith("dont ")]  # « dont HA, système… » : retiré du résumé (reste dans /data)
     return ["■ Calcul data Pi"] + [f"  • {i}" for i in items]
 
 
