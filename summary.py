@@ -52,6 +52,10 @@ ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.ge
             for a in _SUM.get("annotate", [
                 {"entity": "indoor temperature", "with": "indoor dewpoint", "label": "dew point", "mode": "range"},
                 {"entity": "monthly rain", "with": "daily rain", "label": "daily", "mode": "yesterday"}])]
+# Volume échangé calculé en intégrant les débits relevés par HA : désactivé par défaut. Les relevés sont ponctuels (un débit instantané
+# toutes les quelques dizaines de secondes) : les rafales entre deux relevés échappent au calcul, qui sous-estime beaucoup (2,4 Mo
+# annoncés pour un trafic de plus de 200 Mo). Un vrai compteur du routeur serait nécessaire.
+TRAFFIC_VOLUME = CFG.get("summary", {}).get("traffic_volume", False)
 ATTACH = CFG.get("summary", {}).get("attach", {})  # {entity_id: nom d'appareil} : rattache une entité sans appareil à un bloc
 RATE_BYTES = {"B/s": 1, "KB/s": 1e3, "kB/s": 1e3, "KiB/s": 1024, "MB/s": 1e6, "MiB/s": 1024 ** 2, "GB/s": 1e9,
               "GiB/s": 1024 ** 3, "bit/s": 1 / 8, "kbit/s": 125, "Mbit/s": 125e3, "Gbit/s": 125e6}  # octets par seconde
@@ -376,6 +380,8 @@ def traffic_line(name, unit, states, now=None):
     sens = "download" if "download" in low else "upload" if "upload" in low else None
     title = {"download": "Downloaded data", "upload": "Uploaded data"}.get(sens, f"{name} (volume)")
     peak_word = {"download": "pic de download", "upload": "pic d'upload"}.get(sens, "pic")
+    if not TRAFFIC_VOLUME:  # le volume calculé à partir de débits ponctuels est très inférieur au trafic réel : seulement le pic
+        return f"{peak_word.capitalize()} : {peak:g} {unit} à {hm(peak_t)}"
     return (f"{title} : ≈ {fmt_bytes(total * RATE_BYTES[unit])} sur {HOURS} h · {peak_word} {peak:g} {unit} à {hm(peak_t)}")
 
 
