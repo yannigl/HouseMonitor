@@ -105,6 +105,12 @@ avant le dernier démarrage (la ligne l'indique). Elle signale aussi une sous-te
 (`vcgencmd get_throttled`). La ligne disparaît si le journal n'est pas lisible : l'utilisateur doit être dans le groupe `adm`
 ou `systemd-journal` (`groups`).
 
+### Résumé du matin : avertissement « sans nouvelles »
+En tête du résumé, `⚠️ Sans nouvelles` liste tout appareil de mesure dont **aucun** capteur (à relevés réguliers, batterie exclue) n'a donné de
+nouvelles depuis 6 h : `• Weather Station : aucune donnée depuis 27/10 12h03 (2 j)`. Sans cela, un capteur figé ressemble à une valeur « stable ».
+Un appareil qui n'émet que sur événement (porte, mouvement, bouton) n'est jamais signalé. Réglages de `summary` : `stale_hours` (6 ; `0` désactive),
+`stale_ignore` (textes dans le nom de l'appareil à ne pas signaler). `/stale` donne la liste détaillée de toutes les entités silencieuses.
+
 ### Résumé du matin : détecteurs, aspirateur, lignes masquées
 - **🛡 Détecteurs / caméras** : les entités de la config `arm` (groupes et surnoms), les caméras et les détecteurs de mouvement
   (nom contenant motion, mouvement, pir, camera, détecteur, présence) y sont regroupés avec leur appareil. Une entité armable

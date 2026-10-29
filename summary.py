@@ -56,6 +56,10 @@ ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.ge
 # toutes les quelques dizaines de secondes) : les rafales entre deux relevés échappent au calcul, qui sous-estime beaucoup (2,4 Mo
 # annoncés pour un trafic de plus de 200 Mo). Un vrai compteur du routeur serait nécessaire.
 TRAFFIC_VOLUME = CFG.get("summary", {}).get("traffic_volume", False)
+# Avertissement « sans nouvelles » : un appareil dont tous les capteurs de mesure (hors batterie) se taisent depuis plus de STALE_HOURS.
+# `stale_ignore` : textes dans le nom de l'appareil à ne jamais signaler. Mettre `stale_hours` à 0 désactive l'avertissement.
+STALE_HOURS = CFG.get("summary", {}).get("stale_hours", 6)
+STALE_IGNORE = [norm(x) for x in CFG.get("summary", {}).get("stale_ignore", [])]
 ATTACH = CFG.get("summary", {}).get("attach", {})  # {entity_id: nom d'appareil} : rattache une entité sans appareil à un bloc
 RATE_BYTES = {"B/s": 1, "KB/s": 1e3, "kB/s": 1e3, "KiB/s": 1024, "MB/s": 1e6, "MiB/s": 1024 ** 2, "GB/s": 1e9,
               "GiB/s": 1024 ** 3, "bit/s": 1 / 8, "kbit/s": 125, "Mbit/s": 125e3, "Gbit/s": 125e6}  # octets par seconde
@@ -135,6 +139,43 @@ def stale_text(hours=24.0):
     out.append("\nPour les retirer : Home Assistant → Settings → Devices & services → désactiver l'intégration "
                "concernée. Un appareil qui n'émet que rarement (porte, bouton) peut figurer ici sans être mort.")
     return "\n".join(out)
+
+
+def silent_devices(sts, dmap, hours=None):
+    """Appareils de mesure silencieux : [(âge en heures, nom, date de la dernière nouvelle)], du plus ancien au plus récent.
+    Un appareil est « de mesure » s'il a au moins un capteur à relevés réguliers (state_class=measurement, batterie exclue) ;
+    il est silencieux quand le plus récent de ces capteurs n'a pas donné signe de vie depuis `hours` h. Un appareil qui n'émet
+    que sur événement (porte, mouvement, bouton) n'est donc jamais signalé."""
+    hours = STALE_HOURS if hours is None else hours
+    if not hours:
+        return []
+    now = datetime.now().astimezone()
+    last = {}
+    for s in sts:
+        info = dmap.get(s["entity_id"]) or {}
+        a = s.get("attributes", {})
+        if not info.get("d") or not s["entity_id"].startswith("sensor.") or a.get("state_class") != "measurement":
+            continue
+        if is_battery(a.get("friendly_name", "")) or is_ghost(s):
+            continue
+        t = reported_at(s)
+        key = info["d"]
+        if key not in last or t > last[key][0]:
+            last[key] = (t, info.get("n") or key)
+    out = []
+    for t, name in last.values():
+        age = (now - t).total_seconds() / 3600
+        if age >= hours and not any(x in norm(name) for x in STALE_IGNORE):
+            out.append((age, name, t))
+    return sorted(out, reverse=True)
+
+
+def silent_text(sts, dmap):
+    rows = silent_devices(sts, dmap)
+    if not rows:
+        return ""
+    lines = [f"• {name} : aucune donnée depuis {t:%d/%m %Hh%M} ({fmt_age(age)})" for age, name, t in rows]
+    return "\n\n⚠️ Sans nouvelles\n" + "\n".join(lines)
 
 
 def hidden_note(hidden):
@@ -851,6 +892,10 @@ def build():
     for l in dev_lines:
         put(sections["🔌 Switches / lumières"], "• " + l)
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
+    try:  # appareils de mesure silencieux : en tête, pour qu'on ne les prenne pas pour des valeurs « stables »
+        text += silent_text(sts, dmap)
+    except Exception as e:
+        print(f"avertissement « sans nouvelles » impossible : {type(e).__name__}: {e}", file=sys.stderr)
     for key in ("📈 Capteurs", "🚨 Alertes", "🔌 Switches / lumières", DET):  # ordre fixe
         body = lines_of(sections.get(key, []))
         if key == DET:
