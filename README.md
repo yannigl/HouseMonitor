@@ -258,6 +258,11 @@ administrateur à la fois : le bot et la page passent l'un après l'autre).
 - La page **ne lit pas le routeur** : elle affiche les messages reçus d'après `sms_inbox.json`, écrit par `smsfwd`. `"show_inbox": false` masque
   les messages reçus (la page ne propose alors que l'envoi) : à préférer si des enfants l'utilisent, puisque les SMS reçus peuvent contenir des
   codes de confirmation.
+- **Rafraîchissement et sonnerie** : la page relit le fichier local toutes les 15 s (`refresh_seconds`, aucun accès au routeur) et, à l'arrivée
+  d'un nouveau SMS, joue la mélodie « Gran Vals » (celle des vieux Nokia, générée par le navigateur) et fait clignoter le titre de l'onglet. Le bouton
+  « 🔕 Son désactivé » du bloc « Reçus » active le son (le navigateur exige un toucher pour autoriser l'audio ; le choix est mémorisé sur l'appareil).
+  Limites : la page doit rester ouverte au premier plan (un onglet en arrière-plan ou un écran verrouillé peut suspendre le son), le volume et l'interrupteur
+  silencieux de l'appareil s'appliquent, et un SMS n'apparaît qu'à la prochaine lecture de la boîte du routeur par `smsfwd` (`poll_seconds`, 300 s par défaut).
 - Sans mot de passe, tout appareil du réseau local peut envoyer (dans la limite du plafond). N'ouvrez jamais ce port sur internet. Une page
   tierce ne peut pas déclencher d'envoi : les requêtes d'envoi exigent un en-tête propre à la page et une origine identique.
 

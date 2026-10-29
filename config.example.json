@@ -48,6 +48,7 @@
     "host": "0.0.0.0",
     "max_per_day": 10,
     "show_inbox": true,
+    "refresh_seconds": 15,
     "contacts": []
   },
   "smsfwd": {

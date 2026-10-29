@@ -28,6 +28,7 @@ CONF = CFG.get("smsweb", {})
 PORT = CONF.get("port", 8081)
 BIND = CONF.get("host", "0.0.0.0")
 SHOW_INBOX = CONF.get("show_inbox", True)
+REFRESH = max(5, CONF.get("refresh_seconds", 15))  # la page relit le fichier local toutes les N s (aucun accès au routeur)
 CONTACTS = smsstore.contacts()
 
 
@@ -38,8 +39,9 @@ def api_state():
         "sent_today": routersms.sent_today("web"),
         "limit": routersms.LIMITS["web"](),
         "show_inbox": SHOW_INBOX,
+        "refresh": REFRESH,
         "inbox": [{"from": m.get("from"), "name": smsstore.name_of(m.get("from")), "content": m.get("content"),
-                   "time": m.get("receivedTime"), "unread": bool(m.get("unread"))} for m in msgs],
+                   "time": m.get("receivedTime"), "unread": bool(m.get("unread")), "key": m.get("key")} for m in msgs],
         "poll": smsstore.read_status(),
     }
 
@@ -66,11 +68,40 @@ PAGE = """<!doctype html>
 <div id="result" class="small"></div>
 <div id="received">
 <h2>Reçus</h2>
+<button id="sound" style="width:auto;padding:.4rem .9rem">🔕 Son désactivé — touchez pour activer</button>
+<button id="testsound" style="width:auto;padding:.4rem .9rem;background:#6b7785;display:none">♪ Tester</button>
 <div class="small" id="poll"></div>
 <div id="inbox"></div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
+// Sonnerie générée par le navigateur (pas de fichier) : mélodie « Gran Vals » de Tárrega, celle des vieux Nokia.
+const TUNE = [[659.26,1],[587.33,1],[369.99,2],[415.30,2],[554.37,1],[493.88,1],[293.66,2],[329.63,2],[493.88,1],[440,1],[277.18,2],[329.63,2],[440,6]];
+let audio = null, soundOn = false, seen = null, flashTimer = null;
+try { soundOn = localStorage.getItem("sound") === "1"; } catch(e) {}
+function ring(){
+  if (!audio) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return; audio = new C(); }
+  if (audio.state === "suspended") audio.resume();
+  let t = audio.currentTime + 0.05; const unit = 0.11;
+  TUNE.forEach(([f, n]) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = "square"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+    g.gain.setValueAtTime(0.18, t + n*unit - 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + n*unit);
+    o.connect(g); g.connect(audio.destination); o.start(t); o.stop(t + n*unit + 0.02); t += n*unit;
+  });
+}
+function paintSound(){ $("sound").textContent = soundOn ? "🔔 Son activé" : "🔕 Son désactivé — touchez pour activer"; $("testsound").style.display = soundOn ? "" : "none"; }
+$("sound").addEventListener("click", () => { soundOn = !soundOn; try { localStorage.setItem("sound", soundOn ? "1" : "0"); } catch(e) {} if (soundOn) ring(); paintSound(); });
+$("testsound").addEventListener("click", ring);
+paintSound();
+function announce(n){
+  if (soundOn) ring();
+  const base = "SMS du routeur"; let on = true;
+  clearInterval(flashTimer);
+  flashTimer = setInterval(() => { document.title = on ? "🔔 " + n + " nouveau(x) SMS" : base; on = !on; }, 1000);
+}
+document.addEventListener("click", () => { clearInterval(flashTimer); document.title = "SMS du routeur"; });
 const H = {"Content-Type": "application/json", "X-SMSWeb": "1"};
 function fmt(ts){ return ts ? new Date(ts*1000).toLocaleTimeString("fr-FR") : "—"; }
 async function load(){
@@ -88,6 +119,10 @@ async function load(){
     $("poll").className = "small " + (p.ok === false ? "ko" : "");
     const box = $("inbox"); box.innerHTML = "";
     if (!s.inbox.length) box.innerHTML = '<div class="small">Aucun message reçu.</div>';
+    const keys = s.inbox.map(m => m.key);
+    if (seen === null) { seen = new Set(keys); }   // premier affichage : l'existant ne sonne pas
+    const fresh = keys.filter(k => k && !seen.has(k));
+    if (fresh.length) { fresh.forEach(k => seen.add(k)); announce(fresh.length); }
     s.inbox.forEach(m => {
       const d = document.createElement("div"); d.className = "msg" + (m.unread ? " new" : "");
       const f = document.createElement("span"); f.className = "from"; f.textContent = m.name ? m.name + " (" + m.from + ")" : m.from;
@@ -110,7 +145,7 @@ $("send").addEventListener("click", async () => {
   } catch(e) { $("result").className = "small ko"; $("result").textContent = "❌ " + e; }
   load();
 });
-load(); setInterval(load, 30000);
+load(); fetch("/api/state").then(r => r.json()).then(s => setInterval(load, (s.refresh || 15) * 1000)).catch(() => setInterval(load, 15000));
 </script></body></html>
 """
 
