@@ -127,6 +127,8 @@ ou `systemd-journal` (`groups`).
     `-` s'il n'y a pas de relevé). Modes : `line` (ligne habituelle), `max` (maximum de la fenêtre et son heure), `current` (valeur
     actuelle, avec la lettre cardinale pour une direction en °), `yesterday` (maximum de la veille) ;
   - `order` : groupes de capteurs affichés à la suite, dans l'ordre. Défaut : `Monthly Rain` puis `Event Rain` ;
+  - `hide_if_zero` : lignes masquées quand leur valeur est nulle. Défaut : `[{"match": "event rain", "when": "current"}]` (« Event Rain » absent
+    quand sa valeur actuelle est 0 mm ; `"when": "window"` : seulement s'il vaut 0 pendant toutes les 24 h) ;
   - `annotate` : capteur annexe affiché à côté d'un capteur principal du même appareil. Défaut : `Indoor Temperature (dew point) : … (15°C-15.8°C)`
     (plage) et `Monthly Rain : 10.4mm (daily 1.5mm hier)`, ou `(-)` s'il n'a pas plu hier (mode `yesterday`).
   Exemple : `"summary": {"hide": ["solar lux"], "blocks": [{"title": "Wind", "lines": [{"match": "wind speed", "mode": "max"}]}],

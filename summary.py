@@ -41,6 +41,9 @@ BLOCKS = [{"title": b["title"], "lines": [{"match": norm(x["match"]), "mode": x.
           for b in _SUM.get("blocks", [{"title": "Wind", "lines": [
               {"match": "wind speed", "mode": "line"}, {"match": "wind gust", "mode": "line"},
               {"match": "max daily gust", "mode": "yesterday"}, {"match": "wind direction", "mode": "line"}]}])]
+# Lignes masquées quand leur valeur est nulle : « current » = valeur actuelle à 0, « window » = 0 pendant toute la fenêtre.
+HIDE_ZERO = [{"match": norm(h["match"]), "when": h.get("when", "current")}
+             for h in _SUM.get("hide_if_zero", [{"match": "event rain", "when": "current"}])]
 # Groupes de capteurs affichés à la suite les uns des autres, dans cet ordre (le groupe se place où le 1er serait par ordre alphabétique) :
 ORDER = [[norm(x) for x in g] for g in _SUM.get("order", [["monthly rain", "event rain"]])]
 # Annexe affichée à côté d'un capteur principal du même appareil : mode « range » = plage entre parenthèses ; mode
@@ -778,6 +781,12 @@ def build():
                         line = numeric_line(f"{label} ({note[1]})" if note and note[1] else label, unit, series)
                         if line and note and note[2]:
                             line += f" ({note[2]})"
+                    zero = next((h for h in HIDE_ZERO if h["match"] in norm(name)), None)
+                    if line and zero:  # ex. « Event Rain » : pas de ligne quand il ne pleut pas
+                        now_v = floats([cur[eid]]) if eid in cur else floats(series[-1:])
+                        values = now_v if zero["when"] == "current" else floats(series)
+                        if values and all(v == 0 for v in values):
+                            line = None
                     if line and dev in vac_devs and line.endswith("(stable)"):
                         # aspirateur : seulement le total des missions et ce qui a varié sur la fenêtre
                         line = line.replace("(stable)", "(-)") if "total missions" in norm(name) else None
