@@ -629,7 +629,7 @@ def primary_switch(dev_name, switches, fname):
     return min(switches, key=lambda e: (len(e), e))
 
 
-def device_lines(ents, hist, dmap, cur):
+def device_lines(ents, hist, dmap, cur, skip_devs=()):
     """Une ligne par appareil à interrupteur (prises connectées, même inactives) : cycles, statut actuel, énergie totale,
     et la tension seulement si elle est anormale. Puissance, courant et tension normale sont masqués.
     -> (lignes, entités absorbées : l'interrupteur, ses autres interrupteurs et tous ses capteurs)"""
@@ -648,6 +648,8 @@ def device_lines(ents, hist, dmap, cur):
         sw = primary_switch(dev_name, switches, fname)
         sensors = [e for e in members if e.startswith("sensor.")]
         absorbed.update(switches + sensors)
+        if (dmap[switches[0]] or {}).get("d") in skip_devs:
+            continue  # appareil silencieux : déjà signalé en tête, sa ligne ne serait que de l'ancien
         ev, status = switch_info(hist.get(sw, []), (cur.get(sw) or {}).get("state"))
         energy = total = None
         meters = [e for e in sensors if ents[e][1] in UNIT_KWH]
@@ -686,6 +688,13 @@ def order_key(name):
             if pattern in low:
                 return f"{g[0]}\x00{i:03d}"
     return None
+
+
+def group_block(dname, lines):
+    """Lignes d'un appareil sous son en-tête « ■ nom » ; si l'appareil n'a qu'une ligne qui répète son nom, une seule puce suffit."""
+    if len(lines) == 1 and lines[0].startswith(f"  • {dname} :"):
+        return [lines[0][2:]]
+    return [f"■ {dname}"] + lines
 
 
 def lines_of(bucket):
@@ -766,19 +775,19 @@ def build():
     sections = defaultdict(list)
     skipped = []
     dev_lines, absorbed, dmap = [], set(), {}
+    silent_rows = []
     try:  # regroupement par appareil : s'il échoue, on retombe sur une ligne par entité
         dmap = devices_map()
-        dev_lines, absorbed = device_lines(ents, hist, dmap, cur)
+        try:  # appareils de mesure silencieux : signalés en tête, et leurs lignes (valeurs anciennes) ne sont pas répétées plus bas
+            silent_rows = silent_devices(sts, dmap)
+        except Exception as e:
+            print(f"avertissement « sans nouvelles » impossible : {type(e).__name__}: {e}", file=sys.stderr)
+        dev_lines, absorbed = device_lines(ents, hist, dmap, cur, skip_devs={r[3] for r in silent_rows})
     except Exception as e:
         print(f"regroupement par appareil impossible : {type(e).__name__}: {e}", file=sys.stderr)
     # appareils ayant au moins un détecteur / une caméra ; appareils ayant un aspirateur (Roomba…)
     det_devs = {dmap[e]["d"] for e, (n, _) in ents.items() if (dmap.get(e) or {}).get("d") and is_detector(e, n, armed)}
     vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
-    try:  # appareils de mesure silencieux : signalés en tête, et leurs lignes (valeurs anciennes) ne sont pas répétées plus bas
-        silent_rows = silent_devices(sts, dmap)
-    except Exception as e:
-        print(f"avertissement « sans nouvelles » impossible : {type(e).__name__}: {e}", file=sys.stderr)
-        silent_rows = []
     silent_ids = {r[3] for r in silent_rows}
     groups = defaultdict(list)  # appareil -> ses lignes
     det_groups = defaultdict(list)  # appareil de détection -> ses lignes
@@ -908,13 +917,13 @@ def build():
         body = lines_of(sections.get(key, []))
         if key == DET:
             for dname in sorted(det_groups, key=str.lower):
-                body += [f"■ {dname}"] + lines_of(det_groups[dname])
+                body += group_block(dname, lines_of(det_groups[dname]))
         if body:
             text += f"\n\n{key}\n" + "\n".join(body)
     if groups:
         text += "\n\n🏠 Appareils"
         for dname in sorted(groups, key=str.lower):
-            text += f"\n■ {dname}\n" + "\n".join(lines_of(groups[dname]))
+            text += "\n" + "\n".join(group_block(dname, lines_of(groups[dname])))
     pi_lines = pi_data_lines()
     if data_groups or pi_lines:  # volumes du routeur 4G, puis le calcul de data du Pi : mêmes en-têtes et sous-puces, sans ligne vide
         text += "\n\n📡 Data"
