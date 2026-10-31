@@ -150,11 +150,12 @@ def silent_devices(sts, dmap, hours=None):
     if not hours:
         return []
     now = datetime.now().astimezone()
+    vacuums = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}  # leurs compteurs ne bougent qu'après un ménage
     last = {}
     for s in sts:
         info = dmap.get(s["entity_id"]) or {}
         a = s.get("attributes", {})
-        if not info.get("d") or not s["entity_id"].startswith("sensor.") or a.get("state_class") != "measurement":
+        if not info.get("d") or info["d"] in vacuums or not s["entity_id"].startswith("sensor.") or a.get("state_class") != "measurement":
             continue
         if is_battery(a.get("friendly_name", "")) or is_ghost(s):
             continue
@@ -163,18 +164,17 @@ def silent_devices(sts, dmap, hours=None):
         if key not in last or t > last[key][0]:
             last[key] = (t, info.get("n") or key)
     out = []
-    for t, name in last.values():
+    for key, (t, name) in last.items():
         age = (now - t).total_seconds() / 3600
         if age >= hours and not any(x in norm(name) for x in STALE_IGNORE):
-            out.append((age, name, t))
+            out.append((age, name, t, key))
     return sorted(out, reverse=True)
 
 
-def silent_text(sts, dmap):
-    rows = silent_devices(sts, dmap)
+def silent_text(rows):
     if not rows:
         return ""
-    lines = [f"• {name} : aucune donnée depuis {t:%d/%m %Hh%M} ({fmt_age(age)})" for age, name, t in rows]
+    lines = [f"• {name} : aucune donnée depuis {t:%d/%m %Hh%M} ({fmt_age(age)})" for age, name, t, _ in rows]
     return "\n\n⚠️ Sans nouvelles\n" + "\n".join(lines)
 
 
@@ -774,6 +774,12 @@ def build():
     # appareils ayant au moins un détecteur / une caméra ; appareils ayant un aspirateur (Roomba…)
     det_devs = {dmap[e]["d"] for e, (n, _) in ents.items() if (dmap.get(e) or {}).get("d") and is_detector(e, n, armed)}
     vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
+    try:  # appareils de mesure silencieux : signalés en tête, et leurs lignes (valeurs anciennes) ne sont pas répétées plus bas
+        silent_rows = silent_devices(sts, dmap)
+    except Exception as e:
+        print(f"avertissement « sans nouvelles » impossible : {type(e).__name__}: {e}", file=sys.stderr)
+        silent_rows = []
+    silent_ids = {r[3] for r in silent_rows}
     groups = defaultdict(list)  # appareil -> ses lignes
     det_groups = defaultdict(list)  # appareil de détection -> ses lignes
     data_groups = defaultdict(list)  # appareil (routeur 4G…) -> ses lignes de volume de données
@@ -802,6 +808,8 @@ def build():
     blocks = defaultdict(dict)  # (appareil, nom, titre) -> {rang: (libellé, unité, série, mode, état actuel, nom, entity_id)}
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
         if eid in absorbed or eid in annexes or any(h in norm(name) for h in HIDE_NAMES):
+            continue
+        if (dmap.get(eid) or {}).get("d") in silent_ids:
             continue
         series = hist.get(eid, [])
         dom = eid.split(".")[0]
@@ -893,7 +901,7 @@ def build():
         put(sections["🔌 Switches / lumières"], "• " + l)
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
     try:  # appareils de mesure silencieux : en tête, pour qu'on ne les prenne pas pour des valeurs « stables »
-        text += silent_text(sts, dmap)
+        text += silent_text(silent_rows)
     except Exception as e:
         print(f"avertissement « sans nouvelles » impossible : {type(e).__name__}: {e}", file=sys.stderr)
     for key in ("📈 Capteurs", "🚨 Alertes", "🔌 Switches / lumières", DET):  # ordre fixe
