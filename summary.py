@@ -28,7 +28,7 @@ HOURS = CFG.get("hours", 24)
 DOMAINS = CFG.get("domains", ["sensor", "binary_sensor", "switch", "light", "input_boolean"])
 EXCLUDE = CFG.get("exclude", [])
 MAX_TIMES = 5  # au-delà, on n'affiche plus la liste des heures
-VOLT_RANGE = CFG.get("summary", {}).get("voltage_range", [200, 250])  # V : la tension n'est signalée que hors de cette plage
+VOLT_RANGE = CFG.get("summary", {}).get("voltage_range", [195, 255])  # V : la tension n'est signalée que hors de cette plage
 _SUM = CFG.get("summary", {})
 # Résumé du matin seulement (/update all et /update <mot> montrent tout) :
 HIDE_NAMES = [norm(x) for x in _SUM.get("hide", [  # capteurs masqués : texte contenu dans le nom de l'entité

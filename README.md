@@ -155,7 +155,7 @@ Pour chaque appareil qui a un interrupteur (prise connectée…), le résumé ti
 statut actuel, énergie consommée sur la fenêtre, par exemple
 `Déshumidificateur entrée : 2 cycles (07h10, 19h40), allumé · énergie totale 5,04 kWh (+1,20 kWh sur 24 h)`. Toutes les prises connectées sont listées, même sans cycle (« aucun cycle, éteint »).
 - La puissance, le courant et la tension ne sont **pas** affichés. La tension n'est signalée que si elle sort de la plage
-  normale (`⚠️ tension 186–231 V`), réglable : `"summary": {"voltage_range": [200, 250]}`. Les 0 V (prise hors mesure) sont ignorés.
+  normale (`⚠️ tension 186–231 V`), réglable : `"summary": {"voltage_range": [195, 255]}` (défaut : 195–255 V). Les 0 V (prise hors mesure) sont ignorés.
 - L'énergie est la **consommation sur la fenêtre**, calculée d'après le compteur cumulatif (kWh, Wh ou MWh) de l'appareil ;
   une baisse du compteur est comptée comme une remise à zéro.
 - Un appareil sans activité (jamais allumé, éteint, 0 énergie, tension normale) n'apparaît pas.
