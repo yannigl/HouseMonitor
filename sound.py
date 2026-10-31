@@ -2,9 +2,10 @@
 
 La mélodie est calculée ici (onde carrée, fichier WAV dans /tmp), sans fichier son à installer. Le lecteur est cherché dans cet ordre :
   1. config.json -> "audio": {"command": ["aplay", "-q", "-D", "plughw:Headphones,0", "{file}"]} ({file} = le fichier WAV) ;
-  2. le serveur audio de la session (PipeWire/PulseAudio) via `paplay`, si son socket existe pour cet utilisateur ;
-  3. `aplay` (ALSA) : la carte « Headphones » (jack du Pi) si elle existe, ou "audio": {"device": "plughw:Headphones,0"} pour la choisir (voir
-     `aplay -l`), puis la sortie par défaut d'ALSA (souvent HDMI : échoue sans écran, « Unknown error 524 »).
+  2. `aplay` (ALSA) directement sur la carte « Headphones » (jack du Pi) si elle existe, ou "audio": {"device": "plughw:Headphones,0"} (voir `aplay -l`) ;
+  3. le serveur audio de la session (PipeWire/PulseAudio) via `pw-play` ou `paplay`, si son socket existe pour cet utilisateur ; "audio": {"target": "…"}
+     choisit la sortie (nom ou numéro donné par `pw-play --list-targets`) ;
+  4. `aplay` sur la sortie par défaut d'ALSA (souvent HDMI : échoue sans écran, « Unknown error 524 »).
 "audio": {"volume": 0.6} règle l'amplitude du signal (0 à 1) ; le volume du haut-parleur et de la carte son se règle avec alsamixer.
 """
 import math
@@ -67,21 +68,25 @@ def alsa_cards():
 
 
 def candidates(file):
-    """Commandes de lecture à essayer, dans l'ordre : [(commande, environnement)]."""
+    """Commandes de lecture à essayer, dans l'ordre : [(commande, environnement)].
+    1. config « audio.command » ; 2. ALSA direct sur la carte du jack (« audio.device », sinon la carte « Headphones ») ;
+    3. PipeWire (`pw-play`, avec « audio.target » si défini) ou PulseAudio (`paplay`) via la session de l'utilisateur ;
+    4. ALSA par défaut (souvent HDMI : échoue sans écran, « Unknown error 524 »)."""
     out = []
     env = dict(os.environ)
     if CONF.get("command"):
         out.append(([str(c).replace("{file}", str(file)) for c in CONF["command"]], env))
-    runtime = f"/run/user/{os.getuid()}"
-    if os.path.exists(f"{runtime}/pulse/native") and shutil.which("paplay"):
-        out.append((["paplay", str(file)], {**env, "XDG_RUNTIME_DIR": runtime, "PULSE_SERVER": f"unix:{runtime}/pulse/native"}))
     if shutil.which("aplay"):
-        if CONF.get("device"):
-            out.append((["aplay", "-q", "-D", CONF["device"], str(file)], env))
-        else:
-            # Sans réglage : le jack du Pi (carte « Headphones ») d'abord. La sortie par défaut d'ALSA est souvent HDMI, qui échoue
-            # sans écran branché (« audio open error: Unknown error 524 »).
-            out += [(["aplay", "-q", "-D", f"plughw:{c},0", str(file)], env) for c in alsa_cards() if c.lower().startswith("headphones")]
+        devices = [CONF["device"]] if CONF.get("device") else [f"plughw:{c},0" for c in alsa_cards() if c.lower().startswith("headphones")]
+        out += [(["aplay", "-q", "-D", d, str(file)], env) for d in devices]
+    runtime = f"/run/user/{os.getuid()}"
+    if os.path.exists(f"{runtime}/pulse/native") or os.path.exists(f"{runtime}/pipewire-0"):
+        senv = {**env, "XDG_RUNTIME_DIR": runtime, "PULSE_SERVER": f"unix:{runtime}/pulse/native"}
+        if shutil.which("pw-play"):
+            out.append((["pw-play"] + (["--target", str(CONF["target"])] if CONF.get("target") else []) + [str(file)], senv))
+        if shutil.which("paplay"):
+            out.append((["paplay"] + ([f"--device={CONF['target']}"] if CONF.get("target") else []) + [str(file)], senv))
+    if shutil.which("aplay"):
         out.append((["aplay", "-q", str(file)], env))
     return out
 
