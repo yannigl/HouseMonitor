@@ -39,6 +39,7 @@ import arm
 import smsfwd
 import control
 import heating
+import modemwatch
 import summary
 import vacuum
 from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, id_list, load_state, log_net,
@@ -120,7 +121,7 @@ COMMANDS = [
     ("pause", "Aspirateur : pause — /pause <nom>"),
     ("state", "État et attributs d'une entité : /state <mot> (comme Developer tools → States)"),
     ("git", "Mettre à jour le code du Pi : /git pull"),
-    ("restart", "Redémarrer le listener (relit config.json), sans passer par systemd"),
+    ("restart", "Redémarrer le listener (relit config.json) · /restart modem : redémarrer le modem 4G"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("heating", "Chauffage Netatmo : /heating on (normal) · /heating away (absent, plus bas)"),
     ("away", "Absent : tout armer + chauffage en position absent"),
@@ -238,6 +239,21 @@ def shutdown_signal_text(st):
             "log": "/log (note dans le journal, sans alerte)"}.get(SHUTDOWN_SIGNAL, "aucun")
 
 
+MODEM_PENDING = {"t": None}  # demande de redémarrage du modem en attente (en mémoire, comme pour /shutdown)
+
+
+def modem_restart(tg, offset, chat_id):
+    """Exécuté APRÈS l'envoi de la réponse : acquitte la commande, redémarre le modem, signale un échec."""
+    try:
+        tg.call("getUpdates", offset=offset, timeout=0)
+    except Exception as e:
+        print(f"acquittement Telegram KO : {e}", file=sys.stderr)
+    ok, detail = modemwatch.restart_now(chat_id)
+    print(f"redémarrage du modem demandé : {ok} ({detail})", flush=True)
+    if not ok:
+        tg.reply(f"❌ Redémarrage du modem impossible : {detail}", chat_id=chat_id)
+
+
 def restart(tg, offset):
     """Exécuté APRÈS l'envoi de la réponse : relit config.json et le code en se relançant, sans dépendre de systemd."""
     print("redémarrage demandé par /restart", flush=True)
@@ -306,6 +322,17 @@ def handle(text, st, role="admin", chat_id=None):
     parts = text.lower().split()
     cmd = parts[0].split("@")[0] if parts else ""
     args = parts[1:]
+    if cmd == "/restart" and args[:1] == ["modem"]:
+        if args[1:2] != ["confirm"]:
+            MODEM_PENDING["t"] = time.monotonic()
+            return ("⚠️ Redémarrer le modem 4G ?\n• Internet sera coupé 1 à 3 minutes (Telegram aussi) ; vous aurez un message au retour\n"
+                    "• simple redémarrage, aucune remise aux réglages d'usine\n\n"
+                    f"Confirmez dans les {CONFIRM_WINDOW} s : /restart modem confirm")
+        t = MODEM_PENDING["t"]
+        MODEM_PENDING["t"] = None
+        if t is None or time.monotonic() - t > CONFIRM_WINDOW:
+            return "Aucune demande de redémarrage du modem en attente (ou expirée). Refaites /restart modem."
+        return "📶 Redémarrage du modem demandé, patientez…", lambda tg, offset: modem_restart(tg, offset, chat_id)
     if cmd == "/restart":
         problem = syntax_error()
         if problem:
@@ -432,6 +459,7 @@ def loop():
     print(f"Telegram : chat privé {CHAT_ID} · groupes autorisés {sorted(GROUPS)} · administrateurs {sorted(ADMINS)} · membres {sorted(MEMBERS)}",
           flush=True)
     arm.start_timers()  # retour automatique des /arm et /disarm temporaires
+    modemwatch.start()  # thread : coupure d'Internet -> redémarrage automatique du modem (plafonné)
     smsfwd.start()  # thread : SMS reçus par le routeur -> Telegram, indépendant de la page smsweb
     alerts.start()  # thread : première alerte du jour de chaque détecteur (si « alerts » est configuré)
     try:  # menu "/" de Telegram ; ~0,6 Ko, une fois au démarrage

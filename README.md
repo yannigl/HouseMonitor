@@ -266,6 +266,21 @@ administrateur à la fois : le bot et la page passent l'un après l'autre).
 - Sans mot de passe, tout appareil du réseau local peut envoyer (dans la limite du plafond). N'ouvrez jamais ce port sur internet. Une page
   tierce ne peut pas déclencher d'envoi : les requêtes d'envoi exigent un en-tête propre à la page et une origine identique.
 
+### Redémarrage du modem 4G (`/restart modem`, redémarrage automatique)
+- `/restart modem` (administrateurs seulement, pas les membres du groupe) demande le **redémarrage** du routeur TL-MR6400, après confirmation
+  (`/restart modem confirm` dans les 60 s). Internet est coupé 1 à 3 minutes, Telegram aussi ; un message « Modem de retour » arrive ensuite. C'est un
+  simple redémarrage : le bot ne fait **jamais** de remise aux réglages d'usine. Il utilise les identifiants du bloc `sms` (même routeur).
+- **Redémarrage automatique** (thread du listener, `modemwatch.py`) : Internet est « coupé » quand ni `1.1.1.1:443` ni `8.8.8.8:53` ne répondent.
+  Coupé depuis 10 min et routeur joignable sur le réseau local -> redémarrage, au plus **2 par 24 h**, espacés d'au moins **30 min** (une vraie panne
+  d'opérateur ne le fait pas redémarrer en boucle). Au retour d'Internet, un message Telegram donne la durée de la coupure et ce qui a été fait. Les
+  coupures de moins de 2 minutes ne donnent pas de message. L'historique est dans `modem_state.json` (ignoré par git).
+- `config.json` : `"modem": {"auto_restart": true, "down_minutes": 10, "max_per_day": 2, "min_gap_minutes": 30}` ; `"auto_restart": false` désactive
+  le redémarrage automatique (la surveillance et le message de retour restent). `/restart modem` compte dans le plafond.
+- La requête de redémarrage est **lue dans la page du routeur** (`SysRebootRpm`), jamais devinée ; si le format n'est pas reconnu, rien n'est envoyé.
+  Test sans redémarrer : `python3 routersms.py --probe-reboot`.
+- Telegram ne marche pas quand Internet est coupé : `/restart modem` sert quand le modem est dégradé mais joignable ; la coupure franche est traitée
+  par le redémarrage automatique.
+
 ### Chauffage Netatmo (`/heating`, `/away`, `/home`)
 - `/heating on` met le chauffage en **position normale** (le programme de la maison : preset `schedule` de HA), `/heating away` en position **absent**
   (température plus basse : preset `away`). `/heating` seul affiche l'état des thermostats et les thermostats trouvés dans HA.

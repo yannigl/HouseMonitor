@@ -36,6 +36,12 @@
   "arm": {
     "groups": {}
   },
+  "modem": {
+    "auto_restart": true,
+    "down_minutes": 10,
+    "max_per_day": 2,
+    "min_gap_minutes": 30
+  },
   "heating": {
     "entities": []
   },

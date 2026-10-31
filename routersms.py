@@ -175,6 +175,39 @@ def send(text, to=None, bucket="alerts"):
         return False, f"{type(e).__name__}: {e}"
 
 
+def _reboot_url(html):
+    """Adresse de la requête de redémarrage, lue dans la page SysRebootRpm du routeur (formulaire, sinon texte du script). None si introuvable.
+    Jamais d'adresse devinée : un format inconnu n'envoie rien."""
+    form = re.search(r"<form[^>]*action=[\"']?([^\"'\s>]*Reboot[^\"'\s>]*)", html, re.I)
+    for tag in re.findall(r"<input[^>]*>", html, re.I):
+        name = re.search(r"name=[\"']?(\w*[Rr]eboot\w*)", tag)
+        if name:
+            value = re.search(r"value=[\"']?(\w+)", tag)
+            return f"{form.group(1) if form else 'SysRebootRpm.htm'}?{name.group(1)}={value.group(1) if value else name.group(1)}"
+    script = re.search(r"SysRebootRpm\.htm\?[A-Za-z_]+=[A-Za-z_]+", html)
+    return script.group(0) if script else None
+
+
+def reboot(dry_run=False):
+    """Redémarre le routeur (jamais de remise aux réglages d'usine). -> (ok, détail). `dry_run` : lit la page et décrit la requête, sans l'envoyer."""
+    try:
+        with router_session() as router:
+            url = _reboot_url(router._req(router.base + "SysRebootRpm.htm"))
+            if not url:
+                return False, "format de la page de redémarrage du routeur inconnu : rien n'a été envoyé"
+            if dry_run:
+                return True, f"requête prévue : {url} (non envoyée)"
+            try:
+                router._req(router.base + url)
+            except Exception:
+                pass  # la connexion se coupe quand le routeur redémarre : c'est normal
+            return True, "redémarrage demandé"
+    except RouterBusy as e:
+        return False, str(e)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
 AMOUNTS = (8, 10, 5)  # « amountPerPage » : la page du routeur l'envoie avec la lecture ; sa valeur est dans une autre partie de son code
 
 
@@ -235,6 +268,10 @@ def probe_inbox_variants():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--probe-reboot"]:  # décrit la requête de redémarrage sans l'envoyer
+        ok, detail = reboot(dry_run=True)
+        print(("✅ " if ok else "❌ ") + detail)
+        sys.exit(0 if ok else 1)
     if sys.argv[1:2] == ["--probe-inbox-variants"]:
         try:
             print("\n".join(probe_inbox_variants()))

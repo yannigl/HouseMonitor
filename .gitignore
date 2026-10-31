@@ -13,3 +13,4 @@ sms_state.json
 arm_timers.json
 sms_inbox.json
 .router.lock
+modem_state.json
