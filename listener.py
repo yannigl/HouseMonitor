@@ -37,6 +37,7 @@ from pathlib import Path
 import alerts
 import arm
 import smsfwd
+import sound
 import control
 import heating
 import modemwatch
@@ -123,6 +124,7 @@ COMMANDS = [
     ("git", "Mettre à jour le code du Pi : /git pull"),
     ("restart", "Redémarrer le listener (relit config.json) · /restart modem : redémarrer le modem 4G"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
+    ("play", "Joue la sonnerie Nokia sur le haut-parleur du Pi : /play [1 à 5 fois]"),
     ("heating", "Chauffage Netatmo : /heating on (normal) · /heating away (absent, plus bas)"),
     ("away", "Absent : tout armer + chauffage en position absent"),
     ("home", "De retour : tout désarmer + chauffage en position normale (administrateurs)"),
@@ -143,7 +145,7 @@ ADMINS = set(id_list(CFG.get("telegram_admins")))
 if CHAT_ID.lstrip("-").isdigit() and int(CHAT_ID) > 0:
     ADMINS.add(int(CHAT_ID))  # un chat privé a pour identifiant celui de l'utilisateur : le propriétaire est administrateur partout
 MEMBERS = set(id_list(CFG.get("telegram_members")))
-MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "on", "off", "heating", "away", "launch", "send", "pause", "id"}
+MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "on", "off", "heating", "away", "play", "launch", "send", "pause", "id"}
 
 
 def sender_role(chat_id, user_id):
@@ -384,6 +386,10 @@ def handle(text, st, role="admin", chat_id=None):
             return git_pull()
         if cmd == "/rearm":
             return alerts.rearm()
+        if cmd == "/play":  # sonnerie Nokia sur le haut-parleur du Pi ; un nombre (1 à 5) répète la mélodie
+            times = int(args[0]) if args and args[0].isdigit() else 1
+            ok, detail = sound.play(times)
+            return ("🔔 " if ok else "❌ ") + detail
         if cmd == "/heating":
             return heating.act(args[0] if args else None, chat_id)
         if cmd == "/away":  # absent : tout armer, chauffage en position « absent »

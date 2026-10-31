@@ -36,6 +36,9 @@
   "arm": {
     "groups": {}
   },
+  "audio": {
+    "volume": 0.6
+  },
   "modem": {
     "auto_restart": true,
     "down_minutes": 10,
@@ -64,6 +67,8 @@
     "enabled": true,
     "poll_seconds": 300,
     "to_notify_chats": false,
+    "ring": false,
+    "ring_quiet": [22, 7],
     "skip": []
   },
   "alerts": {

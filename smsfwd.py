@@ -6,6 +6,8 @@ config.json -> "smsfwd": {"enabled": true, "poll_seconds": 300, "to_notify_chats
   - poll_seconds : lecture de la boîte du routeur (60 au minimum : c'est aussi le délai avant Telegram). Chaque lecture se connecte au
     routeur comme administrateur (un seul à la fois, voir routersms.py) ;
   - to_notify_chats : aussi aux chats de telegram_notify_chats (sinon : votre chat privé seulement) ;
+  - ring : jouer la sonnerie Nokia sur le haut-parleur du Pi à chaque nouveau SMS (faux par défaut ; voir sound.py) ; ring_quiet : [22, 7]
+    = heures calmes (22h à 7h) sans sonnerie, le message Telegram part quand même ;
   - skip : mots (expéditeur ou texte) qui empêchent la transmission, ex. les codes de confirmation, qui sinon passent par les
     serveurs de Telegram. Ces messages restent dans sms_inbox.json.
 Rien n'est marqué lu ni supprimé sur le routeur. Au premier lancement, l'historique de la boîte n'est pas transmis. Au plus 5 messages
@@ -18,8 +20,10 @@ import time
 
 import routersms
 import smsstore
+import sound
 import summary
 from common import CFG
+from datetime import datetime
 
 _OLD = CFG.get("smsweb", {})
 CONF = CFG.get("smsfwd", {})
@@ -27,6 +31,8 @@ ENABLED = CONF.get("enabled", _OLD.get("forward_telegram", True))
 POLL = max(60, CONF.get("poll_seconds", _OLD.get("poll_seconds", 300)))
 ALL_CHATS = CONF.get("to_notify_chats", _OLD.get("forward_to_notify_chats", False))
 SKIP = [w.lower() for w in CONF.get("skip", _OLD.get("forward_skip", []))]
+RING = CONF.get("ring", False)
+RING_QUIET = CONF.get("ring_quiet", [22, 7])
 MAX_PER_POLL = 5
 LOCK = threading.Lock()
 
@@ -55,6 +61,13 @@ def forward_pending():
     return sent
 
 
+def quiet_now(hour=None):
+    """Heures calmes : [début, fin[ en heures locales, à cheval sur minuit si début > fin."""
+    h = datetime.now().hour if hour is None else hour
+    a, b = RING_QUIET
+    return (a <= h < b) if a <= b else (h >= a or h < b)
+
+
 def poll():
     """Lit la boîte du routeur, ajoute les nouveaux messages au fichier local, puis les transmet. -> (ok, détail)."""
     with LOCK:
@@ -68,6 +81,10 @@ def poll():
         new = [{**m, "key": smsstore.msg_key(m), "fwd": first or not ENABLED} for m in res if smsstore.msg_key(m) not in keys]
         if new or first:
             smsstore.save_inbox(known + new)
+        if RING and new and not first and not quiet_now():
+            ok_ring, why = sound.play(1)
+            if not ok_ring:
+                print(f"SMS : sonnerie impossible : {why}", file=sys.stderr, flush=True)
         sent = forward_pending() if ENABLED else 0
         detail = f"{len(new)} nouveau(x) message(s)" + (f", {sent} transmis à Telegram" if sent else "")
         smsstore.write_status(True, detail, POLL)

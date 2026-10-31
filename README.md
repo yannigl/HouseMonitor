@@ -215,7 +215,7 @@ démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart hous
    "telegram_notify_chats": []
    ```
    - `telegram_chat_id` (votre chat privé avec le bot) garde **tous** les droits ; `telegram_admins` : tous les droits, y compris dans le groupe.
-   - `telegram_members` : `/update`, `/list`, `/state`, `/stale`, `/status`, `/data`, `/arm`, `/on`, `/off`, `/heating`, `/away`, `/launch`, `/send`, `/pause`, `/help`, `/id`.
+   - `telegram_members` : `/update`, `/list`, `/state`, `/stale`, `/status`, `/data`, `/arm`, `/on`, `/off`, `/heating`, `/away`, `/play`, `/launch`, `/send`, `/pause`, `/help`, `/id`.
      **Refusés** : `/disarm` (et `/unarm`), `/home`, `/shutdown`, `/data reset`, `/rearm`, `/git`, `/restart`, `/stop`, `/start`.
    - Les autres utilisateurs du groupe sont ignorés sans réponse, comme les commandes adressées à un autre bot et les messages qui ne sont pas des commandes.
    - **Les suites d'une commande lancée dans le groupe y reviennent aussi** : réponse immédiate, fin de ménage, bac plein ou erreur de Roomba
@@ -265,6 +265,18 @@ administrateur à la fois : le bot et la page passent l'un après l'autre).
   silencieux de l'appareil s'appliquent, et un SMS n'apparaît qu'à la prochaine lecture de la boîte du routeur par `smsfwd` (`poll_seconds`, 300 s par défaut).
 - Sans mot de passe, tout appareil du réseau local peut envoyer (dans la limite du plafond). N'ouvrez jamais ce port sur internet. Une page
   tierce ne peut pas déclencher d'envoi : les requêtes d'envoi exigent un en-tête propre à la page et une origine identique.
+
+### Haut-parleur du Pi : `/play` (sonnerie Nokia)
+`/play` joue sur le haut-parleur branché au jack du Pi la mélodie « Gran Vals » de Tárrega, la sonnerie des vieux Nokia ; `/play 3` la répète
+3 fois (5 au plus). Permise aux membres du groupe. La mélodie est calculée par le programme (fichier WAV dans `/tmp`) : rien à installer sauf le lecteur
+(`sudo apt install alsa-utils`, déjà présent sur Raspberry Pi OS). Le bot essaie dans l'ordre : `audio.command`, `paplay` (session PipeWire/PulseAudio de
+l'utilisateur), puis `aplay`. Si le son ne sort pas :
+- `aplay -l` liste les cartes ; le jack s'appelle en général « Headphones » : `"audio": {"device": "plughw:Headphones,0"}` dans `config.json` ;
+- sous Bookworm avec bureau, PipeWire tient souvent la carte : laissez `paplay` faire (rien à régler), ou fixez la commande complète, ex.
+  `"audio": {"command": ["paplay", "{file}"]}` ;
+- choisir la sortie jack (et non HDMI) : `sudo raspi-config` → System Options → Audio ; régler le volume : `alsamixer` ; `"audio": {"volume": 0.6}` règle l'amplitude du signal.
+- Sonnerie à chaque nouveau SMS : `"smsfwd": {"ring": true, "ring_quiet": [22, 7]}` (désactivée par défaut ; pas de sonnerie entre 22h et 7h ; le message Telegram part
+  quand même). L'horloge du Pi n'a pas de pile : juste après un redémarrage, les heures calmes peuvent être décalées jusqu'à la synchronisation réseau.
 
 ### Redémarrage du modem 4G (`/restart modem`, redémarrage automatique)
 - `/restart modem` (administrateurs seulement, pas les membres du groupe) demande le **redémarrage** du routeur TL-MR6400, après confirmation
