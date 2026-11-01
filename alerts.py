@@ -14,6 +14,7 @@ Seule la première alerte de la journée est envoyée pour chaque appareil, et s
 appareil désarmé n'est pas consommée). Le détail du jour est dans alerts_state.json.
 """
 import json
+import re
 import sys
 import threading
 import time
@@ -27,6 +28,9 @@ from common import CFG, HERE
 CONF = CFG.get("alerts", {})
 FILE = HERE / "alerts_state.json"
 DEFAULT_STATE = {"camera": "recording"}
+
+
+VALID_ID = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")  # un entity_id : un domaine, un point, un nom (jamais deux points)
 
 
 def watches():
@@ -105,7 +109,10 @@ def check(since):
     if not ws:
         return 0
     done = load_done()
-    todo = [w for w in ws if w["entity"] not in done["done"]]
+    bad = [w["entity"] for w in ws if not VALID_ID.match(w["entity"])]
+    if bad:  # un identifiant invalide ferait refuser toute la requête (HTTP 400) : les autres appareils continuent
+        LAST["error"] = f"identifiant invalide dans alerts.watch : {', '.join(bad)} (forme attendue : binary_sensor.nom)"
+    todo = [w for w in ws if w["entity"] not in done["done"] and VALID_ID.match(w["entity"])]
     if not todo:
         return 0
     qs = urllib.parse.urlencode({"filter_entity_id": ",".join(w["entity"] for w in todo),
@@ -144,6 +151,10 @@ def status_text():
     lines = ["🚨 Alertes du jour"]
     armed_cache = {}
     for w in ws:
+        if not VALID_ID.match(w["entity"]):
+            lines.append(f"\n• {w['name']} ({w['entity']})\n   ❌ identifiant invalide : un entity_id a la forme « binary_sensor.nom » (un seul point). "
+                         "Corrigez alerts.watch dans config.json puis /restart.")
+            continue
         try:
             s = summary.http(f"{summary.HA}/api/states/{w['entity']}", summary.AUTH)
             seen = f"{s['state']} (dernier changement {datetime.fromisoformat(s['last_changed']).astimezone():%d/%m %Hh%M})"
