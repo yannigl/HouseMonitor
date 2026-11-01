@@ -123,6 +123,7 @@ COMMANDS = [
     ("state", "État et attributs d'une entité : /state <mot> (comme Developer tools → States)"),
     ("git", "Mettre à jour le code du Pi : /git pull"),
     ("restart", "Redémarrer le listener (relit config.json) · /restart modem : redémarrer le modem 4G"),
+    ("alerts", "Alertes du jour : entités surveillées, état, armement, dernière erreur (administrateurs)"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("play", "Joue la sonnerie Nokia sur le haut-parleur du Pi : /play [1 à 5 fois]"),
     ("heating", "Chauffage Netatmo : /heating on (normal) · /heating away (absent, plus bas)"),
@@ -384,6 +385,8 @@ def handle(text, st, role="admin", chat_id=None):
             if [a.lower() for a in parts[1:]] != ["pull"]:
                 return "Seul « /git pull » est permis : mise à jour du code sur le Pi."
             return git_pull()
+        if cmd == "/alerts":
+            return alerts.status_text()
         if cmd == "/rearm":
             return alerts.rearm()
         if cmd == "/play":  # sonnerie Nokia sur le haut-parleur du Pi ; un nombre (1 à 5) répète la mélodie

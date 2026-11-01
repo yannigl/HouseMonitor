@@ -132,6 +132,40 @@ def check(since):
     return sent
 
 
+LAST = {"check": None, "error": None, "sent": None}  # dernière passe, dernière erreur, dernière alerte envoyée
+
+
+def status_text():
+    """/alerts : état de la surveillance (pour comprendre pourquoi une alerte n'est pas partie)."""
+    ws = watches()
+    if not ws:
+        return "Aucun appareil surveillé : ajoutez « alerts.watch » dans config.json (voir README), puis /restart."
+    done = load_done()
+    lines = ["🚨 Alertes du jour"]
+    armed_cache = {}
+    for w in ws:
+        try:
+            s = summary.http(f"{summary.HA}/api/states/{w['entity']}", summary.AUTH)
+            seen = f"{s['state']} (dernier changement {datetime.fromisoformat(s['last_changed']).astimezone():%d/%m %Hh%M})"
+        except Exception as e:
+            seen = f"INTROUVABLE dans HA ({type(e).__name__}) : l'entité a-t-elle changé de nom ?"
+        if w["armed_by"] and w["armed_by"] not in armed_cache:
+            try:
+                armed_cache[w["armed_by"]] = summary.effective_state(summary.http(f"{summary.HA}/api/states/{w['armed_by']}", summary.AUTH))
+            except Exception:
+                armed_cache[w["armed_by"]] = "introuvable"
+        arm_state = armed_cache.get(w["armed_by"])
+        lines.append(f"\n• {w['name']} ({w['entity']})\n   état HA : {seen}\n   déclencheur : « {w['state'] or 'tout nouvel événement'} »"
+                     + (f"\n   armé par {w['armed_by']} : {arm_state}" + ("" if arm_state not in (None, "off", "unavailable", "unknown", "introuvable") else "  ⚠️ désarmé : aucune alerte") if w["armed_by"] else "")
+                     + f"\n   alerte déjà envoyée aujourd'hui : {'oui (/rearm pour la remettre à zéro)' if w['entity'] in done['done'] else 'non'}")
+    lines.append(f"\nDernière passe de surveillance : {datetime.fromtimestamp(LAST['check']):%Hh%M:%S}" if LAST["check"] else "\nSurveillance pas encore passée (le listener vient de démarrer ?)")
+    if LAST["error"]:
+        lines.append(f"Dernière erreur : {LAST['error']}")
+    if LAST["sent"]:
+        lines.append(f"Dernière alerte envoyée : {LAST['sent']}")
+    return "\n".join(lines)
+
+
 def run():
     poll = max(5, CONF.get("poll_seconds", 20))
     since = datetime.now(timezone.utc) - timedelta(minutes=2)  # recouvre le redémarrage du listener
@@ -139,9 +173,12 @@ def run():
     while True:
         now = datetime.now(timezone.utc)
         try:
-            check(since)
+            if check(since):
+                LAST["sent"] = f"{datetime.now():%d/%m %Hh%M}"
+            LAST["check"], LAST["error"] = time.time(), None
             since = now - timedelta(seconds=2)  # petit recouvrement ; chaque appareil n'alerte qu'une fois par jour
         except Exception as e:  # HA ou Telegram momentanément injoignable : on réessaie à la passe suivante
+            LAST["error"] = f"{type(e).__name__}: {e}"
             print(f"alertes KO : {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         time.sleep(poll)
 

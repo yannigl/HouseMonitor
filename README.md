@@ -385,6 +385,8 @@ seul le message utilise la 4G.
   bloque 2 h après 10 échecs) ; 5 SMS par jour au maximum. Les SMS sont facturés selon votre forfait.
 - **`/rearm`** remet la journée à zéro : la prochaine alerte de chaque appareil est envoyée (Telegram et SMS), puis de nouveau
   une seule fois jusqu'au lendemain. Les mouvements antérieurs à `/rearm` ne sont pas rejoués.
+- **`/alerts`** (administrateurs) montre, pour chaque appareil surveillé : l'état et la date du dernier changement dans HA (ou « INTROUVABLE » si l'entité a changé de nom),
+  le déclencheur, l'état de l'armement, si l'alerte du jour est déjà partie, la dernière passe de surveillance et la dernière erreur. À lancer en premier quand une alerte n'arrive pas.
 - Un fichier `alerts_state.json` (ignoré par git) retient les appareils déjà alertés aujourd'hui. Redémarrer le listener
   après modification de `config.json` : `sudo systemctl restart housemonitor-listener`.
 
