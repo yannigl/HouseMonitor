@@ -28,6 +28,7 @@
   "summary": {
     "voltage_range": [195, 255],
     "temperature_chart": true,
+    "chart_band_metrics": ["temperature"],
     "attach": {}
   },
   "control": {

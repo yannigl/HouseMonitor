@@ -767,6 +767,8 @@ def power_text():
 NOT_TEMPERATURE = ("dew", "feels", "windchill", "wind chill", "heat index", "apparent", "rosee")
 CHART = _SUM.get("temperature_chart", True)
 CHART_METRICS = _SUM.get("chart_metrics", ["temperature", "pressure", "humidity"])  # grandeurs dessinées (et retirées du texte)
+CHART_BAND = _SUM.get("chart_band_metrics", ["temperature"])  # grandeurs dessinées en zone min-max du jour sur les longues périodes
+STATS_MIN_DAYS = 9  # au-delà, l'historique détaillé de HA (10 jours) ne suffit plus : statistiques à long terme
 CHART_REF = {"pressure": 1013}  # repère tracé sur le graphique de pression (hPa)
 # Style des courbes dont le libellé contient le texte : gras et/ou pointillés
 CHART_STYLES = [{"match": norm(x["match"]), "bold": x.get("bold", False), "dashed": x.get("dashed", False)}
@@ -847,10 +849,13 @@ def attach_chart(text, chart_data, start=None, end=None):
     now = end or datetime.now()
     start = start or now - timedelta(hours=HOURS)
     labels = {d[0] for m, data in chart_data.items() if m != "dew" for d in data}
-    keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2]) for d in data] for m, data in chart_data.items() if m != "dew"}
+    keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2], d[4] if len(d) > 4 else None) for d in data]
+             for m, data in chart_data.items() if m != "dew"}
     notes = {}  # capteur -> plage du point de rosée qu'il expose
-    for label, pts, _, dev in chart_data.get("dew", []):
-        vals = [v for _, v in pts]
+    for entry in chart_data.get("dew", []):
+        label, pts, _, dev = entry[:4]
+        band = entry[4] if len(entry) > 4 else None
+        vals = [v for _, v in pts] + ([lo for _, lo, _ in band] + [hi for _, _, hi in band] if band else [])
         if vals:
             notes[sensor_key(label, dev, labels)] = f"{round(min(vals), 1):g}°C-{round(max(vals), 1):g}°C"
     sources = sorted({k[0] for data in keyed.values() for k in data}, key=str.lower)
@@ -862,14 +867,14 @@ def attach_chart(text, chart_data, start=None, end=None):
             continue
         unit = CHART_TITLES[metric][2]
         series = []
-        for src, label, pts, note in data:
+        for src, label, pts, note, band in data:
             vals = [v for _, v in pts]
             fallback.append(f"• {label} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
             if src not in color:
                 continue
             style = next((st for st in CHART_STYLES if st["match"] in norm(src)), {})
             styles[src] = style
-            series.append((color[src][1], pts, style.get("bold", False), style.get("dashed", False)))
+            series.append((color[src][1], pts, style.get("bold", False), style.get("dashed", False), band if metric in CHART_BAND else None))
         panels.append({"unit": unit, "series": series, "ref": CHART_REF.get(metric), "clamp": (0, 100) if metric == "humidity" else None})
     def hint(src):
         st = styles.get(src, {})
@@ -899,9 +904,22 @@ GRAPH_USAGE = ("📈 /graph <période> [grandeur]\n• période : d (24 h, comme
                "l'année)\n• grandeur : temperature, pression ou humidity (une seule ; sans mot, les trois)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature")
 
 
+def stats_points(rows):
+    """Lignes de statistiques [(début du jour, moyenne, min, max)] -> (courbe des moyennes, zone min-max), points placés à midi."""
+    mean, band = [], []
+    for start, avg, lo, hi in rows:
+        if avg is None or lo is None or hi is None:
+            continue
+        t = start + timedelta(hours=12)
+        mean.append((t, avg))
+        band.append((t, lo, hi))
+    return mean, band
+
+
 def graph_report(args, debug=False):
-    """/graph : -> (png, légende) ou un message d'erreur (str). Le graphique couvre la période demandée, avec tous les relevés disponibles dans HA
-    (HA ne garde l'historique que quelques jours : 10 par défaut)."""
+    """/graph : -> (png, légende) ou un message d'erreur (str). Jusqu'à 9 jours : tous les relevés de HA. Au-delà (m, y, mtd, ytd tard dans le mois) :
+    les statistiques à long terme de HA (moyenne, minimum et maximum par jour, via WebSocket), avec une zone min-max translucide pour les températures ;
+    si elles sont indisponibles, l'historique détaillé (10 jours au plus)."""
     period, metrics = "d", []
     for a in args:
         w = norm(a)
@@ -923,15 +941,36 @@ def graph_report(args, debug=False):
     except Exception:
         dmap = {}
     data = {m: [] for m in [*metrics, "dew"]}
+    use_stats = (now - start) > timedelta(days=STATS_MIN_DAYS)
     long_span = (now - start) > timedelta(days=1.5)
-    earliest = None
-    report = [f"🔧 /graph debug : {label}, du {start:%d/%m %Hh%M} au {now:%d/%m %Hh%M}"]
+    wanted = {}  # entity_id -> (nom, unité, grandeur)
     for eid, (name, unit) in discover(sts).items():
-        if not eid.startswith("sensor."):
-            continue
-        metric = chart_metric(name, unit)
-        if metric not in data or (metric == "dew" and "temperature" not in metrics):
-            continue
+        metric = chart_metric(name, unit) if eid.startswith("sensor.") else None
+        if metric in data and not (metric == "dew" and "temperature" not in metrics):
+            wanted[eid] = (name, unit, metric)
+    stats, stats_error = {}, None
+    if use_stats and wanted:
+        try:
+            import hastats
+            stats = hastats.statistics(HA, CFG["ha_token"], list(wanted), start.astimezone(), now.astimezone(), "day",
+                                       {"temperature": "°C", "pressure": "hPa"})
+        except Exception as e:
+            stats_error = f"{type(e).__name__}: {e}"
+            print(f"statistiques de HA illisibles : {stats_error}", file=sys.stderr)
+    report = [f"🔧 /graph debug : {label}, du {start:%d/%m %Hh%M} au {now:%d/%m %Hh%M}" + (f" — statistiques : {stats_error or 'oui'}" if use_stats else "")]
+    earliest, from_stats = None, 0
+    for eid, (name, unit, metric) in wanted.items():
+        dev = (dmap.get(eid) or {}).get("n") or chart_label(name, metric)
+        if stats.get(eid):
+            mean, band = stats_points(stats[eid])  # HA convertit déjà en °C et hPa (paramètre units)
+            if mean:
+                from_stats += 1
+                if debug:
+                    vals = [v for _, v in mean]
+                    report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(mean)} jours de statistiques, de {mean[0][0]:%d/%m} à "
+                                  f"{mean[-1][0]:%d/%m}, min {min(lo for _, lo, _ in band):g}, max {max(hi for _, _, hi in band):g}")
+                data[metric].append((chart_label(name, metric), mean, "", dev, band))
+                continue
         series = history([eid], start.astimezone(), None).get(eid, [])
         if series:
             first = ts(series[0]).replace(tzinfo=None)
@@ -939,18 +978,22 @@ def graph_report(args, debug=False):
         s2, _ = to_celsius(series, unit)
         pts = chart_points(s2, start, now, 700 if long_span else None)
         if debug:
-            raw = [v for v in floats(s2)]
+            raw = floats(s2)
             report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(series)} relevés"
                           + (f", de {ts(series[0]):%d/%m %Hh%M} à {ts(series[-1]):%d/%m %Hh%M}, min {min(raw):g}, max {max(raw):g}" if raw else ", aucun relevé numérique"))
         if pts:
-            data[metric].append((chart_label(name, metric), pts, "", (dmap.get(eid) or {}).get("n") or chart_label(name, metric)))
+            data[metric].append((chart_label(name, metric), pts, "", dev))
     if debug:
         return "\n".join(report)
     if not any(data[m] for m in metrics):
         return f"Aucune mesure ({', '.join(metrics)}) dans l'historique de HA sur cette période."
     _, png, caption = attach_chart("", data, start, now)
     head = f"📈 {label}"
-    if long_span and earliest and earliest > start + (now - start) * 0.08:
+    if from_stats:
+        head += " — statistiques de HA : moyenne par jour" + (" et zone min-max" if any(m in CHART_BAND for m in metrics) else "")
+    if use_stats and from_stats == 0:
+        head += "\n⚠️ statistiques à long terme de HA indisponibles" + (f" ({stats_error})" if stats_error else "") + " : historique détaillé seulement"
+    if long_span and earliest and earliest > start + (now - start) * 0.08 and from_stats == 0:
         head += f"\n⚠️ HA ne remonte que jusqu'au {earliest:%d/%m} (durée de conservation de l'historique, 10 jours par défaut)"
     return (png, f"{head}\n{caption}") if png else "Graphique impossible (voir le journal du listener)."
 

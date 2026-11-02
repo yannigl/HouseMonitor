@@ -118,10 +118,14 @@ intérieures, pressions absolue et relative) sont deux capteurs, donc deux coule
   (« to date »). Aussi : jour, semaine, mois, an.
 - **Grandeur** (les trois par défaut) : `temperature`, `pression` ou `humidity` (une seule). Exemples : `/graph d`, `/graph w`, `/graph mtd pression`, `/graph d temperature`, `/graph ytd humidity` (un mot de grandeur sans période = 24 h).
 - L'axe du temps s'adapte : heures (jusqu'à 36 h), jours (`JJ/MM`), puis mois (`MM/AA`). Au-delà de 36 h, les relevés sont moyennés par paquets (700 points au plus par courbe).
-- **Limite : HA ne garde l'historique que 10 jours par défaut** (`recorder: purge_keep_days`). Pour `m`, `y`, `ytd` ou `mtd` tard dans le mois, la courbe commence à la date de
-  l'historique disponible et la légende le dit (« HA ne remonte que jusqu'au … »). Une conservation plus longue demande de régler `purge_keep_days` dans la configuration de HA
-  (la base grossit). Les courbes ne couvrent pas les mesures sans relevé sur la période.
-- `/graph w debug` (ou n'importe quelle période) n'envoie pas d'image mais, pour chaque capteur retenu, le nombre de relevés lus dans HA, leurs dates extrêmes, le minimum et le maximum :
+- **Au-delà de 9 jours (`m`, `y`, `ytd`, et `mtd` tard dans le mois)** : HA ne garde l'historique détaillé que 10 jours par défaut (`recorder: purge_keep_days`), mais ses **statistiques à long terme**
+  (moyenne, minimum, maximum par jour) ne sont pas supprimées. `/graph` les lit par l'API WebSocket de HA (`hastats.py`, bibliothèque standard, avec le même jeton que le reste). La courbe est la
+  moyenne par jour ; pour la **température**, une **zone translucide entre le minimum et le maximum du jour** (de la couleur du capteur) s'y ajoute : quand les zones de plusieurs capteurs se chevauchent,
+  les couleurs se superposent et on voit encore chacune. `"chart_band_metrics": ["temperature", "humidity"]` étend la zone à d'autres grandeurs (défaut : température seulement). Seuls les capteurs
+  qui ont une `state_class` (tous vos capteurs de mesure) ont des statistiques ; elles commencent à la date où HA les a enregistrées pour la première fois.
+- Si les statistiques ne sont pas disponibles, le graphique se rabat sur l'historique détaillé et la légende le dit (« statistiques à long terme de HA indisponibles », « HA ne remonte que jusqu'au … »).
+- `/graph m debug` (ou n'importe quelle période) n'envoie pas d'image mais, pour chaque capteur retenu, le nombre de relevés (ou de jours de statistiques) lus dans HA, leurs dates extrêmes, le minimum et le maximum,
+  et si les statistiques de HA ont répondu :
   utile pour comprendre une légende ou une courbe inattendue.
 - Les capteurs « sans nouvelles » ne sont pas écartés ici : leurs relevés passés apparaissent.
 

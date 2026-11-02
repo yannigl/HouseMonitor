@@ -58,6 +58,20 @@ class Canvas:
                 d = math.hypot(x - (x0 + t * dx), y - (y0 + t * dy))
                 self.blend(x, y, color, max(0.0, min(1.0, width / 2 + 0.5 - d)))
 
+    def band(self, cols, color, alpha=0.24):
+        """Zone entre une courbe haute et une courbe basse : `cols` = [(x, y_haut, y_bas)] triés par x, interpolés colonne par colonne."""
+        if len(cols) == 1:
+            cols = [(cols[0][0] - 2, cols[0][1], cols[0][2]), (cols[0][0] + 2, cols[0][1], cols[0][2])]
+        i = 0
+        for x in range(int(cols[0][0]), int(cols[-1][0]) + 1):
+            while i < len(cols) - 2 and cols[i + 1][0] < x:
+                i += 1
+            (xa, ha, la), (xb, hb, lb) = cols[i], cols[i + 1]
+            f = 0.0 if xb == xa else max(0.0, min(1.0, (x - xa) / (xb - xa)))
+            top, bottom = ha + (hb - ha) * f, la + (lb - la) * f
+            for y in range(int(top), int(bottom) + 1):
+                self.blend(x, y, color, alpha)
+
     def polyline(self, pp, color, width=2.2, dash=None):
         """Courbe passant par les points `pp` ; `dash` = (trait, espace) en pixels pour des pointillés (le motif continue d'un segment à l'autre)."""
         phase = 0.0
@@ -157,7 +171,8 @@ def render(panels, start, end):
     for n, panel in enumerate(panels):
         y0 = n * (PANEL_H + PANEL_GAP) + PANEL_GAP
         y1 = y0 + PANEL_H - 6
-        vals = [v for _, pts, _, _ in panel["series"] for _, v in pts]
+        vals = [v for entry in panel["series"] for _, v in entry[1]]
+        vals += [v for entry in panel["series"] if len(entry) > 4 and entry[4] for _, lo, hi in entry[4] for v in (lo, hi)]
         if panel.get("ref") is not None:
             vals.append(panel["ref"])
         lo, hi = min(vals), max(vals)
@@ -185,7 +200,10 @@ def render(panels, start, end):
             yr = py(panel["ref"])
             c.polyline([(x0, yr), (x1, yr)], (60, 60, 60), 1.6, (6, 5))
             c.text(x1 - 6, int(yr) - 16, f"{panel['ref']:g}", color=(60, 60, 60), anchor="right")
-        for color, points, bold, dashed in panel["series"]:
+        for entry in panel["series"]:
+            color, points, bold, dashed = entry[:4]
+            if len(entry) > 4 and entry[4]:  # plage minimum-maximum du jour : zone translucide, les chevauchements restent visibles
+                c.band([(px(t), py(max(ymin, min(ymax, hi))), py(max(ymin, min(ymax, lo)))) for t, lo, hi in entry[4]], color)
             pp = [(px(t), py(max(ymin, min(ymax, v)))) for t, v in points]
             c.polyline(pp, color, WIDTH_BOLD if bold else WIDTH_NORMAL, (DASH if dashed is True else dashed) or None)
     return c.png()
