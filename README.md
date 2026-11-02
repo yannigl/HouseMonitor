@@ -101,8 +101,8 @@ Le listener se relance tout seul quand le `git pull` du matin modifie `listener.
 ### Résumé du matin : graphique des températures
 Au lieu d'une ligne par capteur, les températures (tous les capteurs en °C ou °F, convertis en °C ; hors point de rosée, ressenti, windchill) sont
 dessinées sur **une image** envoyée après le texte, avec **tous les relevés** des dernières 24 h et une courbe de couleur par capteur (8 au plus). La légende du message
-donne pour chaque capteur une pastille de la couleur de sa courbe, le minimum, le maximum et la valeur actuelle (et la plage de rosée pour la température intérieure
-de la station météo). L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib), envoyée par `/update` au chat d'où la commande est
+donne pour chaque capteur une pastille de la couleur de sa courbe et son nom (et la plage de rosée pour la température intérieure de la station météo) ;
+`"chart_values": true` y ajoute le minimum, le maximum et la valeur actuelle. L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib), envoyée par `/update` au chat d'où la commande est
 partie. `"summary": {"temperature_chart": false}` revient aux lignes de texte ; si le dessin échoue, la légende passe dans le texte.
 `python3 summary.py --dry` écrit l'image dans `temperatures.png`.
 
@@ -123,7 +123,7 @@ Un appareil qui n'émet que sur événement (porte, mouvement, bouton) n'est jam
 - **🛡 Détecteurs / caméras** : les entités de la config `arm` (groupes et surnoms), les caméras et les détecteurs de mouvement
   (nom contenant motion, mouvement, pir, camera, détecteur, présence) y sont regroupés avec leur appareil. Une entité armable
   affiche son état (`armé` / `désarmé`) et ses changements sur la fenêtre.
-- **Aspirateur** (appareil ayant une entité `vacuum.*`, ex. Roomba) : seulement les alertes qui ont eu lieu (`Bin full : 1 alerte (12h15)`) et les compteurs
+- **Aspirateur** (appareil ayant une entité `vacuum.*`, ex. Roomba) : seulement les alertes qui ont eu lieu (`Bin full : 1 alerte (12h15)` ; « Charging » est ignoré) et les compteurs
   de missions qui ont varié, avec leur variation entre parenthèses (`Successful missions : 100 (+1)`), puis `Total missions : 164 (+1)` (ou `(-)` s'il n'a pas
   varié ; toujours présent). Les durées (temps de ménage…) ne figurent pas dans le résumé.
 - **Section « 📡 Data »** : les volumes de données du routeur 4G (Downloaded/Uploaded data, issus des débits) sont rangés dans leur propre

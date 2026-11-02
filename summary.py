@@ -766,6 +766,7 @@ def power_text():
 
 NOT_TEMPERATURE = ("dew", "feels", "windchill", "wind chill", "heat index", "apparent", "rosee")
 CHART = _SUM.get("temperature_chart", True)
+CHART_VALUES = _SUM.get("chart_values", False)  # minimum, maximum et valeur actuelle dans la légende du graphique
 
 
 def is_temperature(name, unit):
@@ -808,8 +809,9 @@ def attach_chart(text, chart_series):
         dot = chart.PALETTE[i][0] if i < len(chart.PALETTE) else "•"
         if i < len(chart.PALETTE):
             colored.append((chart.PALETTE[i][1], pts))
-        extra = f" · rosée {note}" if note else ""
-        lines.append(f"{dot} {label} : {min(vals):g} → {max(vals):g} °C, actuel {vals[-1]:g}{extra}")
+        values = f" : {min(vals):g} → {max(vals):g} °C, actuel {vals[-1]:g}" if CHART_VALUES else ""
+        extra = f" (rosée {note})" if note else ""
+        lines.append(f"{dot} {label}{values}{extra}")
     caption = "\n".join(lines)[:1000]
     try:
         return text, chart.render(colored, now - timedelta(hours=HOURS), now), caption
@@ -883,6 +885,8 @@ def build_report(with_chart=True):
             continue
         if (dmap.get(eid) or {}).get("d") in silent_ids:
             continue
+        if (dmap.get(eid) or {}).get("d") in vac_devs and eid.startswith("binary_sensor.") and "charging" in norm(name):
+            continue  # « Charging » du Roomba : pas une alerte utile
         series = hist.get(eid, [])
         dom = eid.split(".")[0]
         info = dmap.get(eid) or {}
