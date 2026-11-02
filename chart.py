@@ -159,5 +159,5 @@ def render(panels, start, end):
             c.text(x1 - 6, int(yr) - 16, f"{panel['ref']:g}", color=(60, 60, 60), anchor="right")
         for color, points, bold, dashed in panel["series"]:
             pp = [(px(t), py(max(ymin, min(ymax, v)))) for t, v in points]
-            c.polyline(pp, color, WIDTH_BOLD if bold else WIDTH_NORMAL, DASH if dashed else None)
+            c.polyline(pp, color, WIDTH_BOLD if bold else WIDTH_NORMAL, (DASH if dashed is True else dashed) or None)
     return c.png()

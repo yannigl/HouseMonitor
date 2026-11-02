@@ -766,7 +766,6 @@ def power_text():
 
 NOT_TEMPERATURE = ("dew", "feels", "windchill", "wind chill", "heat index", "apparent", "rosee")
 CHART = _SUM.get("temperature_chart", True)
-CHART_VALUES = _SUM.get("chart_values", False)  # minimum, maximum et valeur actuelle dans la légende des graphiques
 CHART_METRICS = _SUM.get("chart_metrics", ["temperature", "pressure", "humidity"])  # grandeurs dessinées (et retirées du texte)
 CHART_REF = {"pressure": 1013}  # repère tracé sur le graphique de pression (hPa)
 # Style des courbes dont le libellé contient le texte : gras et/ou pointillés
@@ -818,36 +817,43 @@ def temperature_points(series):
 
 
 def attach_chart(text, chart_data):
-    """Dessine les graphiques (un par grandeur, les uns sous les autres) et prépare la légende. En cas d'échec du dessin, les valeurs
-    (minimum, maximum, actuel) passent dans le texte. -> (texte, png ou None, légende)."""
+    """Dessine les graphiques (un par grandeur, les uns sous les autres) et prépare la légende : une couleur par appareil, la même sur tous
+    les graphiques, donc une seule liste de pastilles. En cas d'échec du dessin, les valeurs passent dans le texte. -> (texte, png ou None, légende)."""
     import chart  # import tardif : le dessin n'est utile qu'ici
     now = datetime.now()
-    panels, blocks, fallback = [], [], []
+    sources = sorted({d[3] for data in chart_data.values() for d in data}, key=str.lower)
+    color = {src: chart.PALETTE[i] for i, src in enumerate(sources[:len(chart.PALETTE)])}  # au-delà de 8 appareils : pas de courbe
+    panels, fallback, notes = [], [], {}
     for metric in ("temperature", "pressure", "humidity"):
-        data = sorted(chart_data.get(metric, []), key=lambda s: s[0].lower())
+        data = sorted(chart_data.get(metric, []), key=lambda d: d[0].lower())
         if not data:
             continue
-        emoji, title, unit = CHART_TITLES[metric]
-        ref = CHART_REF.get(metric)
-        lines = [f"{emoji} {title} ({unit}" + (f", repère {ref:g}" if ref else "") + ")"]
-        series = []
-        for i, (label, pts, note) in enumerate(data):
+        unit = CHART_TITLES[metric][2]
+        series, seen = [], {}
+        for label, pts, note, src in data:
             vals = [v for _, v in pts]
-            dot = chart.PALETTE[i][0] if i < len(chart.PALETTE) else "•"
-            style = next((st for st in CHART_STYLES if st["match"] in norm(label)), {})
-            if i < len(chart.PALETTE):
-                series.append((chart.PALETTE[i][1], pts, style.get("bold", False), style.get("dashed", False)))
-            values = f" : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}" if CHART_VALUES else ""
-            lines.append(f"{dot} {label}{values}" + (f" (rosée {note})" if note else ""))
             fallback.append(f"• {label} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
-        panels.append({"unit": unit, "series": series, "ref": ref, "clamp": (0, 100) if metric == "humidity" else None})
-        blocks.append("\n".join(lines))
-    caption = "\n\n".join(blocks)[:1000]
+            if note:
+                notes[src] = note
+            if src not in color:
+                continue
+            style = next((st for st in CHART_STYLES if st["match"] in norm(label)), {})
+            seen[src] = seen.get(src, 0) + 1
+            # deux courbes du même appareil dans un graphique : la seconde est en pointillés fins pour les distinguer
+            dashed = DASH_FINE if seen[src] > 1 and not (style.get("bold") or style.get("dashed")) else style.get("dashed", False)
+            series.append((color[src][1], pts, style.get("bold", False), dashed))
+        panels.append({"unit": unit, "series": series, "ref": CHART_REF.get(metric), "clamp": (0, 100) if metric == "humidity" else None})
+    legend = [f"{color[src][0]} {src}" + (f" (rosée {notes[src]})" if src in notes else "") for src in sources if src in color]
+    legend += [f"• {src}" for src in sources if src not in color]  # sans couleur : plus de 8 appareils
+    caption = "\n".join(legend)[:1000]
     try:
         return text, chart.render(panels, now - timedelta(hours=HOURS), now), caption
     except Exception as e:
         print(f"graphique impossible : {type(e).__name__}: {e}", file=sys.stderr)
         return text + "\n\n📈 Mesures (graphique indisponible)\n" + "\n".join(fallback), None, ""
+
+
+DASH_FINE = (3, 4)
 
 
 def build(with_chart=False):
@@ -922,7 +928,8 @@ def build_report(with_chart=True):
                 pts = temperature_points(s2)
                 if pts:
                     note = annotations.get(eid)
-                    chart_data[metric].append((chart_label(name, metric), pts, note[2] if note and note[2] else ""))
+                    label = chart_label(name, metric)
+                    chart_data[metric].append((label, pts, note[2] if note and note[2] else "", (dmap.get(eid) or {}).get("n") or label))
                 continue
         if any(h in norm(name) for h in HIDE_NAMES):
             continue

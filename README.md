@@ -101,13 +101,14 @@ Le listener se relance tout seul quand le `git pull` du matin modifie `listener.
 ### Résumé du matin : graphiques (températures, pression, humidité)
 Au lieu d'une ligne par capteur, les températures (capteurs en °C ou °F, convertis en °C ; hors point de rosée, ressenti, windchill), les pressions (hPa,
 hors déficit de pression de vapeur) et les humidités (%) sont dessinées sur **une seule image à trois graphiques les uns sous les autres**, envoyée après le texte :
-tous les relevés des dernières 24 h, une courbe de couleur par capteur (8 au plus par graphique, mêmes couleurs d'un graphique à l'autre mais sans lien entre
-elles), avec 1013 hPa en repère pointillé sur le graphique de pression. La légende du message donne, pour chaque graphique, une pastille de la couleur de la courbe et le
-nom du capteur (et la plage de rosée pour la température intérieure de la station météo).
+tous les relevés des dernières 24 h, avec 1013 hPa en repère pointillé sur le graphique de pression. **Une couleur par appareil (8 au plus), la même sur les trois
+graphiques** : la légende du message est donc une seule liste de pastilles et de noms d'appareils (avec la plage de rosée pour la température intérieure de la station météo),
+sans titre de grandeur (l'unité est écrite sur chaque graphique). Deux courbes du même appareil dans un graphique (ex. extérieur et intérieur) : la seconde est en pointillés fins,
+sauf si un style est défini ci-dessous.
 - Styles : `"chart_styles": [{"match": "outdoor", "bold": true}, {"match": "grenier", "dashed": true}]` (défaut) : les courbes dont le nom contient « outdoor » sont
   en gras, celles qui contiennent « grenier » en pointillés.
 - `"chart_metrics": ["temperature", "pressure", "humidity"]` (défaut) : grandeurs dessinées ; celles qui ne sont pas listées restent en lignes de texte.
-  `"temperature_chart": false` supprime les graphiques. `"chart_values": true` ajoute minimum, maximum et valeur actuelle à la légende.
+  `"temperature_chart": false` supprime les graphiques.
 - L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib) et envoyée par `/update` au chat d'où la commande est partie. Si le dessin échoue, les valeurs
   passent dans le texte. `python3 summary.py --dry` écrit l'image dans `temperatures.png`.
 
