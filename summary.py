@@ -376,8 +376,8 @@ def history(entity_ids, start=None, end=None):
     """Historique des entités : par défaut sur la fenêtre du résumé ; `start` et `end` (datetime avec fuseau) pour une autre période."""
     start = start or datetime.now(timezone.utc) - timedelta(hours=HOURS)
     params = {"filter_entity_id": ",".join(entity_ids), "minimal_response": "", "no_attributes": ""}
-    if end:
-        params["end_time"] = end.isoformat()
+    # Sans end_time, l'API de HA s'arrête à début + 1 jour : une période de 7 jours serait coupée au bout de 24 h (courbes plates ensuite).
+    params["end_time"] = (end or datetime.now(timezone.utc)).isoformat()
     qs = urllib.parse.urlencode(params)
     data = http(f"{HA}/api/history/period/{start.isoformat()}?{qs}", AUTH)
     return {lst[0]["entity_id"]: lst for lst in data if lst}
