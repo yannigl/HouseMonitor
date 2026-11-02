@@ -121,6 +121,8 @@ intérieures, pressions absolue et relative) sont deux capteurs, donc deux coule
 - **Limite : HA ne garde l'historique que 10 jours par défaut** (`recorder: purge_keep_days`). Pour `m`, `y`, `ytd` ou `mtd` tard dans le mois, la courbe commence à la date de
   l'historique disponible et la légende le dit (« HA ne remonte que jusqu'au … »). Une conservation plus longue demande de régler `purge_keep_days` dans la configuration de HA
   (la base grossit). Les courbes ne couvrent pas les mesures sans relevé sur la période.
+- `/graph w debug` (ou n'importe quelle période) n'envoie pas d'image mais, pour chaque capteur retenu, le nombre de relevés lus dans HA, leurs dates extrêmes, le minimum et le maximum :
+  utile pour comprendre une légende ou une courbe inattendue.
 - Les capteurs « sans nouvelles » ne sont pas écartés ici : leurs relevés passés apparaissent.
 
 ### Résumé du matin : alimentation du Pi

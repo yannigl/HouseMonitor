@@ -899,13 +899,15 @@ GRAPH_USAGE = ("📈 /graph <période> [grandeur]\n• période : d (24 h, comme
                "l'année)\n• grandeur : temperature, pression ou humidity (une seule ; sans mot, les trois)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature")
 
 
-def graph_report(args):
+def graph_report(args, debug=False):
     """/graph : -> (png, légende) ou un message d'erreur (str). Le graphique couvre la période demandée, avec tous les relevés disponibles dans HA
     (HA ne garde l'historique que quelques jours : 10 par défaut)."""
     period, metrics = "d", []
     for a in args:
         w = norm(a)
-        if w in PERIODS or w in PERIOD_WORDS:
+        if w == "debug":
+            debug = True
+        elif w in PERIODS or w in PERIOD_WORDS:
             period = PERIOD_WORDS.get(w, w)
         elif w in METRIC_WORDS:
             metrics.append(METRIC_WORDS[w])
@@ -923,6 +925,7 @@ def graph_report(args):
     data = {m: [] for m in [*metrics, "dew"]}
     long_span = (now - start) > timedelta(days=1.5)
     earliest = None
+    report = [f"🔧 /graph debug : {label}, du {start:%d/%m %Hh%M} au {now:%d/%m %Hh%M}"]
     for eid, (name, unit) in discover(sts).items():
         if not eid.startswith("sensor."):
             continue
@@ -935,8 +938,14 @@ def graph_report(args):
             earliest = first if earliest is None else min(earliest, first)
         s2, _ = to_celsius(series, unit)
         pts = chart_points(s2, start, now, 700 if long_span else None)
+        if debug:
+            raw = [v for v in floats(s2)]
+            report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(series)} relevés"
+                          + (f", de {ts(series[0]):%d/%m %Hh%M} à {ts(series[-1]):%d/%m %Hh%M}, min {min(raw):g}, max {max(raw):g}" if raw else ", aucun relevé numérique"))
         if pts:
             data[metric].append((chart_label(name, metric), pts, "", (dmap.get(eid) or {}).get("n") or chart_label(name, metric)))
+    if debug:
+        return "\n".join(report)
     if not any(data[m] for m in metrics):
         return f"Aucune mesure ({', '.join(metrics)}) dans l'historique de HA sur cette période."
     _, png, caption = attach_chart("", data, start, now)
