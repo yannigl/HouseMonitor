@@ -24,6 +24,7 @@ GLYPHS = {
     "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"], "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
     ":": ["00000", "00100", "00100", "00000", "00100", "00100", "00000"], ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
     "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+    "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
     "%": ["11001", "11010", "00010", "00100", "01000", "01011", "10011"], "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
     "h": ["10000", "10000", "10110", "11001", "10001", "10001", "10001"], "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
     "a": ["00000", "00000", "01110", "00001", "01111", "10001", "01111"], "°": ["01100", "10010", "10010", "01100", "00000", "00000", "00000"],
@@ -108,6 +109,35 @@ def nice_step(span, target=6):
     return 10 * mag
 
 
+def time_ticks(start, end):
+    """Repères de l'axe du temps selon la durée : toutes les 3 h (HH:MM) jusqu'à 36 h, chaque jour ou tous les N jours (JJ/MM) jusqu'à 70 jours,
+    puis chaque mois (MM/AA). -> [(datetime, étiquette)]."""
+    span = (end - start).total_seconds() / 86400
+    out = []
+    if span <= 1.5:
+        t = start.replace(minute=0, second=0, microsecond=0)
+        while t <= end:
+            if t >= start and t.hour % 3 == 0:
+                out.append((t, f"{t:%H:%M}"))
+            t += timedelta(hours=1)
+    elif span <= 70:
+        step = next(k for k in (1, 2, 3, 5, 7, 10, 14, 30) if span / k <= 9)
+        t = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        while t <= end:
+            if t >= start and t.toordinal() % step == 0:
+                out.append((t, f"{t:%d/%m}"))
+            t += timedelta(days=1)
+    else:
+        t = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        while t <= end:
+            if t >= start:
+                out.append((t, f"{t:%m/%y}"))
+            t = (t.replace(day=28) + timedelta(days=4)).replace(day=1)
+        if len(out) > 12:
+            out = out[::2]
+    return out
+
+
 PANEL_H, PANEL_GAP = 290, 24
 WIDTH_NORMAL, WIDTH_BOLD, DASH = 2.2, 4.8, (11, 7)
 
@@ -123,6 +153,7 @@ def render(panels, start, end):
     total = (end - start).total_seconds()
     px = lambda t: x0 + (t - start).total_seconds() / total * (x1 - x0)
     grid, axis = (225, 225, 225), (120, 120, 120)
+    ticks = time_ticks(start, end)
     for n, panel in enumerate(panels):
         y0 = n * (PANEL_H + PANEL_GAP) + PANEL_GAP
         y1 = y0 + PANEL_H - 6
@@ -141,14 +172,11 @@ def render(panels, start, end):
             c.rect(x0, y, x1, y, grid)
             c.text(x0 - 8, y - 7, f"{v:g}", anchor="right")
             v += step
-        t = start.replace(minute=0, second=0, microsecond=0)
-        while t <= end:  # lignes verticales toutes les 3 heures ; les heures sont écrites sous le dernier graphique
-            if t >= start and t.hour % 3 == 0:
-                x = int(px(t))
-                c.rect(x, y0, x, y1, grid)
-                if n == len(panels) - 1:
-                    c.text(x, y1 + 10, f"{t:%H:%M}", anchor="center")
-            t = t + timedelta(hours=1)
+        for t, label in ticks:  # lignes verticales ; les étiquettes sont écrites sous le dernier graphique
+            x = int(px(t))
+            c.rect(x, y0, x, y1, grid)
+            if n == len(panels) - 1:
+                c.text(x, y1 + 10, label, anchor="center")
         c.rect(x0, y0, x0, y1, axis)
         c.rect(x0, y1, x1, y1, axis)
         c.rect(x0 + 3, y0 + 2, x0 + 8 + len(panel["unit"]) * 18 + 4, y0 + 30, (255, 255, 255))  # fond blanc : l'unité reste lisible sous une courbe

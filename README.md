@@ -112,6 +112,17 @@ intérieures, pressions absolue et relative) sont deux capteurs, donc deux coule
 - L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib) et envoyée par `/update` au chat d'où la commande est partie. Si le dessin échoue, les valeurs
   passent dans le texte. `python3 summary.py --dry` écrit l'image dans `temperatures.png`.
 
+### Graphiques à la demande (`/graph`)
+`/graph` renvoie le même graphique que le résumé du matin (température, pression, humidité, une pastille par capteur), sur la période et la grandeur demandées. Autorisé aux membres du groupe.
+- **Période** (24 h par défaut) : `d` (24 heures), `w` (7 jours), `m` (30 jours), `y` (12 mois) ; `wtd`, `mtd`, `ytd` : depuis lundi, depuis le début du mois, depuis le 1er janvier
+  (« to date »). Aussi : jour, semaine, mois, an.
+- **Grandeur** (les trois par défaut) : `temperature`, `pression` ou `humidity` (une seule). Exemples : `/graph`, `/graph w`, `/graph mtd pression`, `/graph temperature`, `/graph ytd humidity`.
+- L'axe du temps s'adapte : heures (jusqu'à 36 h), jours (`JJ/MM`), puis mois (`MM/AA`). Au-delà de 36 h, les relevés sont moyennés par paquets (700 points au plus par courbe).
+- **Limite : HA ne garde l'historique que 10 jours par défaut** (`recorder: purge_keep_days`). Pour `m`, `y`, `ytd` ou `mtd` tard dans le mois, la courbe commence à la date de
+  l'historique disponible et la légende le dit (« HA ne remonte que jusqu'au … »). Une conservation plus longue demande de régler `purge_keep_days` dans la configuration de HA
+  (la base grossit). Les courbes ne couvrent pas les mesures sans relevé sur la période.
+- Les capteurs « sans nouvelles » ne sont pas écartés ici : leurs relevés passés apparaissent.
+
 ### Résumé du matin : alimentation du Pi
 Une ligne `⚡ Alimentation du Pi : N alertes de sous-tension sur 24 h, dernière à HHhMM` est ajoutée au résumé et à `/update`
 (compte les « Under-voltage detected » du journal du noyau, `journalctl -k`). Le journal étant volatil, la fenêtre ne remonte pas

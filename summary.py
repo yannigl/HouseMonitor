@@ -804,19 +804,29 @@ def chart_label(name, metric):
     return base or name
 
 
-def temperature_points(series):
-    """[(heure locale, valeur)] sur la fenêtre, tous les relevés, prolongés jusqu'à maintenant (la dernière valeur reste vraie)."""
-    now = datetime.now()
-    start = now - timedelta(hours=HOURS)
+def chart_points(series, start, end, max_points=None):
+    """[(heure locale, valeur)] entre `start` et `end` (datetimes locaux sans fuseau), tous les relevés, prolongés jusqu'à `end` (la dernière valeur
+    reste vraie). `max_points` : moyennes par paquets au-delà (périodes longues)."""
     pts = []
     for st in series:
         try:
-            pts.append((max(ts(st).replace(tzinfo=None), start), float(st["state"])))
+            t = ts(st).replace(tzinfo=None)
+            if t < start:  # avant la période : seul le dernier relevé compte (valeur au début), sinon les courbes démarrent par un trait vertical
+                pts = []
+            pts.append((max(t, start), float(st["state"])))
         except (ValueError, KeyError, TypeError):
             pass  # unavailable / unknown
+    if max_points and len(pts) > max_points:
+        n = len(pts) // max_points + 1
+        pts = [(pts[i + len(pts[i:i + n]) // 2][0], sum(v for _, v in pts[i:i + n]) / len(pts[i:i + n])) for i in range(0, len(pts), n)]
     if pts:
-        pts.append((now, pts[-1][1]))
+        pts.append((end, pts[-1][1]))
     return pts
+
+
+def temperature_points(series):
+    now = datetime.now()
+    return chart_points(series, now - timedelta(hours=HOURS), now)
 
 
 def sensor_key(label, dev, labels):
@@ -830,18 +840,19 @@ def sensor_key(label, dev, labels):
     return label
 
 
-def attach_chart(text, chart_data):
+def attach_chart(text, chart_data, start=None, end=None):
     """Dessine les graphiques (un par grandeur, les uns sous les autres) et prépare la légende : une pastille = un capteur, de la même couleur
     sur les trois graphiques. En cas d'échec du dessin, les valeurs passent dans le texte. -> (texte, png ou None, légende)."""
     import chart  # import tardif : le dessin n'est utile qu'ici
-    now = datetime.now()
+    now = end or datetime.now()
+    start = start or now - timedelta(hours=HOURS)
     labels = {d[0] for m, data in chart_data.items() if m != "dew" for d in data}
     keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2]) for d in data] for m, data in chart_data.items() if m != "dew"}
     notes = {}  # capteur -> plage du point de rosée qu'il expose
     for label, pts, _, dev in chart_data.get("dew", []):
         vals = [v for _, v in pts]
         if vals:
-            notes[sensor_key(label, dev, labels)] = f"{min(vals):g}°C-{max(vals):g}°C"
+            notes[sensor_key(label, dev, labels)] = f"{round(min(vals), 1):g}°C-{round(max(vals), 1):g}°C"
     sources = sorted({k[0] for data in keyed.values() for k in data}, key=str.lower)
     color = {src: chart.PALETTE[i] for i, src in enumerate(sources[:len(chart.PALETTE)])}  # au-delà de 8 capteurs : pas de courbe
     panels, fallback, styles = [], [], {}
@@ -867,10 +878,72 @@ def attach_chart(text, chart_data):
     legend += [f"• {src}" for src in sources if src not in color]  # sans couleur : plus de 8 capteurs
     caption = "\n".join(legend)[:1000]
     try:
-        return text, chart.render(panels, now - timedelta(hours=HOURS), now), caption
+        return text, chart.render(panels, start, now), caption
     except Exception as e:
         print(f"graphique impossible : {type(e).__name__}: {e}", file=sys.stderr)
         return text + "\n\n📈 Mesures (graphique indisponible)\n" + "\n".join(fallback), None, ""
+
+
+PERIODS = {  # mot -> (libellé, début) ; « to date » : depuis le début de la semaine (lundi), du mois, de l'année
+    "d": ("24 heures", lambda n: n - timedelta(hours=24)), "w": ("7 jours", lambda n: n - timedelta(days=7)),
+    "m": ("30 jours", lambda n: n - timedelta(days=30)), "y": ("12 mois", lambda n: n - timedelta(days=365)),
+    "wtd": ("depuis lundi", lambda n: (n - timedelta(days=n.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)),
+    "mtd": ("depuis le début du mois", lambda n: n.replace(day=1, hour=0, minute=0, second=0, microsecond=0)),
+    "ytd": ("depuis le 1er janvier", lambda n: n.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)),
+}
+PERIOD_WORDS = {"jour": "d", "day": "d", "semaine": "w", "week": "w", "mois": "m", "month": "m", "an": "y", "annee": "y", "year": "y",
+                "wtd": "wtd", "mtd": "mtd", "ytd": "ytd", "1d": "d", "7d": "w", "30d": "m", "365d": "y"}
+METRIC_WORDS = {"temperature": "temperature", "temp": "temperature", "pression": "pressure", "pressure": "pressure",
+                "humidity": "humidity", "humidite": "humidity"}
+GRAPH_USAGE = ("📈 /graph [période] [grandeur]\n• période : d (24 h, défaut), w (7 j), m (30 j), y (12 mois), wtd / mtd / ytd (depuis lundi / le début du mois / de "
+               "l'année)\n• grandeur : temperature, pression ou humidity (une seule ; sans mot, les trois)\nEx. /graph w · /graph mtd pression · /graph temperature")
+
+
+def graph_report(args):
+    """/graph : -> (png, légende) ou un message d'erreur (str). Le graphique couvre la période demandée, avec tous les relevés disponibles dans HA
+    (HA ne garde l'historique que quelques jours : 10 par défaut)."""
+    period, metrics = "d", []
+    for a in args:
+        w = norm(a)
+        if w in PERIODS or w in PERIOD_WORDS:
+            period = PERIOD_WORDS.get(w, w)
+        elif w in METRIC_WORDS:
+            metrics.append(METRIC_WORDS[w])
+        else:
+            return f"Mot inconnu : « {a} ».\n\n{GRAPH_USAGE}"
+    metrics = metrics or ["temperature", "pressure", "humidity"]
+    label, begin = PERIODS[period]
+    now = datetime.now()
+    start = min(begin(now), now - timedelta(hours=2))  # une période « to date » à peine commencée reste lisible
+    sts = states()
+    try:
+        dmap = devices_map()
+    except Exception:
+        dmap = {}
+    data = {m: [] for m in [*metrics, "dew"]}
+    long_span = (now - start) > timedelta(days=1.5)
+    earliest = None
+    for eid, (name, unit) in discover(sts).items():
+        if not eid.startswith("sensor."):
+            continue
+        metric = chart_metric(name, unit)
+        if metric not in data or (metric == "dew" and "temperature" not in metrics):
+            continue
+        series = history([eid], start.astimezone(), None).get(eid, [])
+        if series:
+            first = ts(series[0]).replace(tzinfo=None)
+            earliest = first if earliest is None else min(earliest, first)
+        s2, _ = to_celsius(series, unit)
+        pts = chart_points(s2, start, now, 700 if long_span else None)
+        if pts:
+            data[metric].append((chart_label(name, metric), pts, "", (dmap.get(eid) or {}).get("n") or chart_label(name, metric)))
+    if not any(data[m] for m in metrics):
+        return f"Aucune mesure ({', '.join(metrics)}) dans l'historique de HA sur cette période."
+    _, png, caption = attach_chart("", data, start, now)
+    head = f"📈 {label}"
+    if long_span and earliest and earliest > start + (now - start) * 0.08:
+        head += f"\n⚠️ HA ne remonte que jusqu'au {earliest:%d/%m} (durée de conservation de l'historique, 10 jours par défaut)"
+    return (png, f"{head}\n{caption}") if png else "Graphique impossible (voir le journal du listener)."
 
 
 def build(with_chart=False):

@@ -125,6 +125,7 @@ COMMANDS = [
     ("restart", "Redémarrer le listener (relit config.json) · /restart modem : redémarrer le modem 4G"),
     ("alerts", "Alertes du jour : entités surveillées, état, armement, dernière erreur (administrateurs)"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
+    ("graph", "Graphique température / pression / humidité : /graph [d|w|m|y|wtd|mtd|ytd] [temperature|pression|humidity]"),
     ("play", "Joue la sonnerie Nokia sur le haut-parleur du Pi : /play [1 à 5 fois]"),
     ("heating", "Chauffage Netatmo : /heating on (normal) · /heating away (absent, plus bas)"),
     ("away", "Absent : tout armer + chauffage en position absent"),
@@ -146,7 +147,7 @@ ADMINS = set(id_list(CFG.get("telegram_admins")))
 if CHAT_ID.lstrip("-").isdigit() and int(CHAT_ID) > 0:
     ADMINS.add(int(CHAT_ID))  # un chat privé a pour identifiant celui de l'utilisateur : le propriétaire est administrateur partout
 MEMBERS = set(id_list(CFG.get("telegram_members")))
-MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "on", "off", "heating", "away", "play", "launch", "send", "pause", "id"}
+MEMBER_COMMANDS = {"help", "status", "update", "list", "state", "stale", "data", "arm", "on", "off", "heating", "away", "graph", "play", "launch", "send", "pause", "id"}
 
 
 def sender_role(chat_id, user_id):
@@ -397,6 +398,17 @@ def handle(text, st, role="admin", chat_id=None):
             return alerts.status_text()
         if cmd == "/rearm":
             return alerts.rearm()
+        if cmd == "/graph":
+            if args and args[0] in ("help", "aide", "?"):
+                return summary.GRAPH_USAGE
+
+            def graph_after(tg, offset, args=list(args), target=chat_id if chat_id is not None else CHAT_ID):
+                res = summary.graph_report(args)
+                if isinstance(res, str):
+                    tg.reply(res, chat_id=target)
+                else:
+                    send_chart(target, *res)
+            return "📈 Je prépare le graphique…", graph_after
         if cmd == "/play":  # sonnerie Nokia sur le haut-parleur du Pi ; un nombre (1 à 5) répète la mélodie
             times = int(args[0]) if args and args[0].isdigit() else 1
             ok, detail = sound.play(times)
