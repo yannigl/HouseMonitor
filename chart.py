@@ -152,6 +152,21 @@ def time_ticks(start, end):
     return out
 
 
+def runs(points, is_gap):
+    """Découpe une liste de points [(t, valeur)] en tronçons continus : une valeur « trou » (is_gap) sépare deux tronçons."""
+    out, cur = [], []
+    for t, v in points:
+        if is_gap(v):
+            if cur:
+                out.append(cur)
+            cur = []
+        else:
+            cur.append((t, v))
+    if cur:
+        out.append(cur)
+    return out
+
+
 PANEL_H, PANEL_GAP = 290, 24
 WIDTH_NORMAL, WIDTH_BOLD, DASH = 2.2, 4.8, (11, 7)
 
@@ -171,8 +186,8 @@ def render(panels, start, end):
     for n, panel in enumerate(panels):
         y0 = n * (PANEL_H + PANEL_GAP) + PANEL_GAP
         y1 = y0 + PANEL_H - 6
-        vals = [v for entry in panel["series"] for _, v in entry[1]]
-        vals += [v for entry in panel["series"] if len(entry) > 4 and entry[4] for _, lo, hi in entry[4] for v in (lo, hi)]
+        vals = [v for entry in panel["series"] for _, v in entry[1] if v is not None]
+        vals += [v for entry in panel["series"] if len(entry) > 4 and entry[4] for _, lo, hi in entry[4] if lo is not None for v in (lo, hi)]
         if panel.get("ref") is not None:
             vals.append(panel["ref"])
         lo, hi = min(vals), max(vals)
@@ -203,7 +218,9 @@ def render(panels, start, end):
         for entry in panel["series"]:
             color, points, bold, dashed = entry[:4]
             if len(entry) > 4 and entry[4]:  # plage minimum-maximum du jour : zone translucide, les chevauchements restent visibles
-                c.band([(px(t), py(max(ymin, min(ymax, hi))), py(max(ymin, min(ymax, lo)))) for t, lo, hi in entry[4]], color)
-            pp = [(px(t), py(max(ymin, min(ymax, v)))) for t, v in points]
-            c.polyline(pp, color, WIDTH_BOLD if bold else WIDTH_NORMAL, (DASH if dashed is True else dashed) or None)
+                for run in runs([(t, (lo, hi)) for t, lo, hi in entry[4]], lambda v: v[0] is None):  # un trou de données coupe la zone
+                    c.band([(px(t), py(max(ymin, min(ymax, hi))), py(max(ymin, min(ymax, lo)))) for t, (lo, hi) in run], color)
+            for run in runs(points, lambda v: v is None):  # idem pour la courbe
+                c.polyline([(px(t), py(max(ymin, min(ymax, v)))) for t, v in run], color, WIDTH_BOLD if bold else WIDTH_NORMAL,
+                           (DASH if dashed is True else dashed) or None)
     return c.png()

@@ -855,7 +855,7 @@ def attach_chart(text, chart_data, start=None, end=None):
     for entry in chart_data.get("dew", []):
         label, pts, _, dev = entry[:4]
         band = entry[4] if len(entry) > 4 else None
-        vals = [v for _, v in pts] + ([lo for _, lo, _ in band] + [hi for _, _, hi in band] if band else [])
+        vals = [v for _, v in pts if v is not None] + ([lo for _, lo, _ in band if lo is not None] + [hi for _, _, hi in band if hi is not None] if band else [])
         if vals:
             notes[sensor_key(label, dev, labels)] = f"{round(min(vals), 1):g}°C-{round(max(vals), 1):g}°C"
     sources = sorted({k[0] for data in keyed.values() for k in data}, key=str.lower)
@@ -868,7 +868,7 @@ def attach_chart(text, chart_data, start=None, end=None):
         unit = CHART_TITLES[metric][2]
         series = []
         for src, label, pts, note, band in data:
-            vals = [v for _, v in pts]
+            vals = [v for _, v in pts if v is not None]
             fallback.append(f"• {label} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
             if src not in color:
                 continue
@@ -904,13 +904,17 @@ GRAPH_USAGE = ("📈 /graph <période> [grandeur]\n• période : d (24 h, comme
                "l'année)\n• grandeur : temperature, pression ou humidity (une seule ; sans mot, les trois)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature")
 
 
-def stats_points(rows):
-    """Lignes de statistiques [(début du jour, moyenne, min, max)] -> (courbe des moyennes, zone min-max), points placés à midi."""
+def stats_points(rows, max_gap=timedelta(days=1.6)):
+    """Lignes de statistiques [(début du jour, moyenne, min, max)] -> (courbe des moyennes, zone min-max), points placés à midi.
+    Un trou de plus de `max_gap` (capteur muet quelques jours) coupe la courbe : un point (heure, None) sert de séparateur."""
     mean, band = [], []
     for start, avg, lo, hi in rows:
         if avg is None or lo is None or hi is None:
             continue
         t = start + timedelta(hours=12)
+        if mean and mean[-1][1] is not None and t - mean[-1][0] > max_gap:
+            mean.append((mean[-1][0] + (t - mean[-1][0]) / 2, None))
+            band.append((mean[-1][0], None, None))
         mean.append((t, avg))
         band.append((t, lo, hi))
     return mean, band
@@ -966,9 +970,9 @@ def graph_report(args, debug=False):
             if mean:
                 from_stats += 1
                 if debug:
-                    vals = [v for _, v in mean]
-                    report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(mean)} jours de statistiques, de {mean[0][0]:%d/%m} à "
-                                  f"{mean[-1][0]:%d/%m}, min {min(lo for _, lo, _ in band):g}, max {max(hi for _, _, hi in band):g}")
+                    real = [b for b in band if b[1] is not None]
+                    report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(real)} jours de statistiques, de {real[0][0]:%d/%m} à "
+                                  f"{real[-1][0]:%d/%m}, min {min(lo for _, lo, _ in real):g}, max {max(hi for _, _, hi in real):g}" + (", avec des trous" if len(real) < len(band) else ""))
                 data[metric].append((chart_label(name, metric), mean, "", dev, band))
                 continue
         series = history([eid], start.astimezone(), None).get(eid, [])

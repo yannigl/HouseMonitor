@@ -123,6 +123,7 @@ intérieures, pressions absolue et relative) sont deux capteurs, donc deux coule
   moyenne par jour ; pour la **température**, une **zone translucide entre le minimum et le maximum du jour** (de la couleur du capteur) s'y ajoute : quand les zones de plusieurs capteurs se chevauchent,
   les couleurs se superposent et on voit encore chacune. `"chart_band_metrics": ["temperature", "humidity"]` étend la zone à d'autres grandeurs (défaut : température seulement). Seuls les capteurs
   qui ont une `state_class` (tous vos capteurs de mesure) ont des statistiques ; elles commencent à la date où HA les a enregistrées pour la première fois.
+- Un capteur muet plus de 1,6 jour (panne, pile) **coupe** sa courbe et sa zone au lieu de relier les deux côtés du trou.
 - Si les statistiques ne sont pas disponibles, le graphique se rabat sur l'historique détaillé et la légende le dit (« statistiques à long terme de HA indisponibles », « HA ne remonte que jusqu'au … »).
 - `/graph m debug` (ou n'importe quelle période) n'envoie pas d'image mais, pour chaque capteur retenu, le nombre de relevés (ou de jours de statistiques) lus dans HA, leurs dates extrêmes, le minimum et le maximum,
   et si les statistiques de HA ont répondu :
