@@ -782,6 +782,8 @@ def is_temperature(name, unit):
 def chart_metric(name, unit):
     """« temperature », « pressure » ou « humidity » si le capteur va dans un graphique, sinon None."""
     low = norm(name)
+    if unit in ("°C", "°F") and ("dewpoint" in low or "dew point" in low):
+        return "dew"  # point de rosée : pas de courbe, sa plage est dans la légende du capteur qui l'expose
     if is_temperature(name, unit):
         return "temperature"
     if unit in ("hPa", "mbar", "mb") and "pressure" in low and not any(w in low for w in ("deficit", "vapour", "vapor")):
@@ -793,7 +795,8 @@ def chart_metric(name, unit):
 
 def chart_label(name, metric):
     """Nom du capteur sans le mot de la grandeur (« Weather Station Indoor Temperature » -> « Weather Station Indoor »)."""
-    word = {"temperature": ("temperature", "température"), "pressure": ("pressure",), "humidity": ("humidity",)}[metric]
+    word = {"temperature": ("temperature", "température"), "pressure": ("pressure",), "humidity": ("humidity",),
+            "dew": ("dewpoint", "dew point")}[metric]
     base = name.strip()
     for w in word:
         if base.lower().endswith(" " + w):
@@ -832,11 +835,16 @@ def attach_chart(text, chart_data):
     sur les trois graphiques. En cas d'échec du dessin, les valeurs passent dans le texte. -> (texte, png ou None, légende)."""
     import chart  # import tardif : le dessin n'est utile qu'ici
     now = datetime.now()
-    labels = {d[0] for data in chart_data.values() for d in data}
-    keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2]) for d in data] for m, data in chart_data.items()}
+    labels = {d[0] for m, data in chart_data.items() if m != "dew" for d in data}
+    keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2]) for d in data] for m, data in chart_data.items() if m != "dew"}
+    notes = {}  # capteur -> plage du point de rosée qu'il expose
+    for label, pts, _, dev in chart_data.get("dew", []):
+        vals = [v for _, v in pts]
+        if vals:
+            notes[sensor_key(label, dev, labels)] = f"{min(vals):g}°C-{max(vals):g}°C"
     sources = sorted({k[0] for data in keyed.values() for k in data}, key=str.lower)
     color = {src: chart.PALETTE[i] for i, src in enumerate(sources[:len(chart.PALETTE)])}  # au-delà de 8 capteurs : pas de courbe
-    panels, fallback, notes, styles = [], [], {}, {}
+    panels, fallback, styles = [], [], {}
     for metric in ("temperature", "pressure", "humidity"):
         data = sorted(keyed.get(metric, []), key=lambda d: d[0].lower())
         if not data:
@@ -846,8 +854,6 @@ def attach_chart(text, chart_data):
         for src, label, pts, note in data:
             vals = [v for _, v in pts]
             fallback.append(f"• {label} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
-            if note:
-                notes[src] = note
             if src not in color:
                 continue
             style = next((st for st in CHART_STYLES if st["match"] in norm(src)), {})
@@ -900,7 +906,7 @@ def build_report(with_chart=True):
     det_devs = {dmap[e]["d"] for e, (n, _) in ents.items() if (dmap.get(e) or {}).get("d") and is_detector(e, n, armed)}
     vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
     silent_ids = {r[3] for r in silent_rows}
-    chart_data = {m: [] for m in CHART_METRICS} if with_chart else None  # grandeur -> [(libellé, [(heure, valeur)], note)]
+    chart_data = {m: [] for m in [*CHART_METRICS, "dew"]} if with_chart else None  # grandeur -> [(libellé, [(heure, valeur)], note)]
     groups = defaultdict(list)  # appareil -> ses lignes
     det_groups = defaultdict(list)  # appareil de détection -> ses lignes
     data_groups = defaultdict(list)  # appareil (routeur 4G…) -> ses lignes de volume de données
@@ -928,7 +934,7 @@ def build_report(with_chart=True):
                         break
     blocks = defaultdict(dict)  # (appareil, nom, titre) -> {rang: (libellé, unité, série, mode, état actuel, nom, entity_id)}
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
-        if eid in absorbed or eid in annexes:
+        if eid in absorbed:
             continue
         if (dmap.get(eid) or {}).get("d") in silent_ids:
             continue
@@ -942,6 +948,8 @@ def build_report(with_chart=True):
                     label = chart_label(name, metric)
                     chart_data[metric].append((label, pts, note[2] if note and note[2] else "", (dmap.get(eid) or {}).get("n") or label))
                 continue
+        if eid in annexes:
+            continue
         if any(h in norm(name) for h in HIDE_NAMES):
             continue
         if (dmap.get(eid) or {}).get("d") in vac_devs and eid.startswith("binary_sensor.") and "charging" in norm(name):
@@ -1071,7 +1079,7 @@ def build_report(with_chart=True):
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
                  f"{'s' if len(skipped) > 1 else ''} (données illisibles, détail dans run.log) : {shown}")
     png, caption = None, ""
-    if chart_data and any(chart_data.values()):
+    if chart_data and any(chart_data[m] for m in CHART_METRICS):
         text, png, caption = attach_chart(text, chart_data)
     return text + power_text(), png, caption
 

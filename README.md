@@ -102,7 +102,7 @@ Le listener se relance tout seul quand le `git pull` du matin modifie `listener.
 Au lieu d'une ligne par capteur, les températures (capteurs en °C ou °F, convertis en °C ; hors point de rosée, ressenti, windchill), les pressions (hPa,
 hors déficit de pression de vapeur) et les humidités (%) sont dessinées sur **une seule image à trois graphiques les uns sous les autres**, envoyée après le texte :
 tous les relevés des dernières 24 h, avec 1013 hPa en repère pointillé sur le graphique de pression. **Une pastille = un capteur, de la même couleur sur les trois graphiques** :
-la légende du message est une seule liste de pastilles et de noms (avec la plage de rosée pour la température intérieure de la station), sans titre de grandeur (l'unité est
+la légende du message est une seule liste de pastilles et de noms, avec, pour chaque capteur qui expose un point de rosée (« Dewpoint », « Indoor Dewpoint », « Dew point »…), sa plage sur 24 h (`rosée 2.9°C-7.1°C`), sans titre de grandeur (l'unité est
 écrite sur chaque graphique). Chez Ecowitt, « Weather Station Outdoor » (température et humidité extérieures) et « Weather Station Indoor » (console : température et humidité
 intérieures, pressions absolue et relative) sont deux capteurs, donc deux couleurs.
 - Styles : `"chart_styles": [{"match": "outdoor", "bold": true}, {"match": "grenier", "dashed": true}]` (défaut) : **trait épais = extérieur (« outdoor »), pointillés = grenier**,
