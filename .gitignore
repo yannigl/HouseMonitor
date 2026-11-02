@@ -14,3 +14,4 @@ arm_timers.json
 sms_inbox.json
 .router.lock
 modem_state.json
+temperatures.png

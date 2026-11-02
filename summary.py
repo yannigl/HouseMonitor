@@ -19,6 +19,7 @@ import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from common import CFG, count, data_block, fmt_bytes, heartbeat, id_list, load_state, log_net, norm
 
@@ -763,7 +764,67 @@ def power_text():
             f"dernière à {last:%Hh%M}{now_flag}\n   → alimentation ou câble à vérifier")
 
 
-def build():
+NOT_TEMPERATURE = ("dew", "feels", "windchill", "wind chill", "heat index", "apparent", "rosee")
+CHART = _SUM.get("temperature_chart", True)
+
+
+def is_temperature(name, unit):
+    low = norm(name)
+    return unit in ("°C", "°F") and "temperature" in low and not any(w in low for w in NOT_TEMPERATURE)
+
+
+def temperature_label(name):
+    base = name.strip()
+    for tail in (" Temperature", " temperature", " Température", " température"):
+        if base.endswith(tail):
+            base = base[: -len(tail)]
+    return base or name
+
+
+def temperature_points(series):
+    """[(heure locale, valeur °C)] sur la fenêtre, tous les relevés, prolongés jusqu'à maintenant (la dernière valeur reste vraie)."""
+    now = datetime.now()
+    start = now - timedelta(hours=HOURS)
+    pts = []
+    for st in series:
+        try:
+            pts.append((max(ts(st).replace(tzinfo=None), start), float(st["state"])))
+        except (ValueError, KeyError, TypeError):
+            pass  # unavailable / unknown
+    if pts:
+        pts.append((now, pts[-1][1]))
+    return pts
+
+
+def attach_chart(text, chart_series):
+    """Dessine le graphique et prépare sa légende. En cas d'échec du dessin, la légende (minimum, maximum, actuel) passe dans le texte."""
+    import chart  # import tardif : le dessin n'est utile qu'ici
+    now = datetime.now()
+    shown = sorted(chart_series, key=lambda s: s[0].lower())
+    lines = ["🌡 Températures sur %d h" % HOURS]
+    colored = []
+    for i, (label, pts, note) in enumerate(shown):
+        vals = [v for _, v in pts]
+        dot = chart.PALETTE[i][0] if i < len(chart.PALETTE) else "•"
+        if i < len(chart.PALETTE):
+            colored.append((chart.PALETTE[i][1], pts))
+        extra = f" · rosée {note}" if note else ""
+        lines.append(f"{dot} {label} : {min(vals):g} → {max(vals):g} °C, actuel {vals[-1]:g}{extra}")
+    caption = "\n".join(lines)[:1000]
+    try:
+        return text, chart.render(colored, now - timedelta(hours=HOURS), now), caption
+    except Exception as e:
+        print(f"graphique impossible : {type(e).__name__}: {e}", file=sys.stderr)
+        return text + "\n\n" + "\n".join(l.lstrip("🔴🔵🟢🟠🟣🟤🟡⚫• ") for l in lines), None, ""
+
+
+def build(with_chart=False):
+    return build_report(with_chart)[0]
+
+
+def build_report(with_chart=True):
+    """-> (texte, png ou None, légende du graphique). Avec `with_chart`, les températures ne sont plus en lignes de texte : un
+    graphique les montre toutes (une courbe par capteur), et sa légende donne le minimum, le maximum et la valeur actuelle."""
     sts = states()
     cur = {s["entity_id"]: s for s in sts}
     ents = discover(sts)
@@ -772,6 +833,7 @@ def build():
         if eid in cur and eid not in ents and not is_ghost(cur[eid]):
             ents[eid] = (cur[eid].get("attributes", {}).get("friendly_name", eid), "")
     hist = history(list(ents))
+    with_chart = with_chart and CHART
     sections = defaultdict(list)
     skipped = []
     dev_lines, absorbed, dmap = [], set(), {}
@@ -789,6 +851,7 @@ def build():
     det_devs = {dmap[e]["d"] for e, (n, _) in ents.items() if (dmap.get(e) or {}).get("d") and is_detector(e, n, armed)}
     vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
     silent_ids = {r[3] for r in silent_rows}
+    chart_series = [] if with_chart else None  # (libellé, [(heure, valeur)], note) des capteurs de température
     groups = defaultdict(list)  # appareil -> ses lignes
     det_groups = defaultdict(list)  # appareil de détection -> ses lignes
     data_groups = defaultdict(list)  # appareil (routeur 4G…) -> ses lignes de volume de données
@@ -831,6 +894,12 @@ def build():
         detector = is_detector(eid, name, armed) or dev in det_devs
         if dom == "sensor":
             series, unit = to_celsius(series, unit)
+            if chart_series is not None and is_temperature(name, unit):  # va dans le graphique, pas dans le texte
+                pts = temperature_points(series)
+                if pts:
+                    note = annotations.get(eid)
+                    chart_series.append((temperature_label(name), pts, note[2] if note and note[2] else ""))
+                continue
             slot = next(((b["title"], i, ln) for b in BLOCKS for i, ln in enumerate(b["lines"])
                          if ln["match"] in norm(name)), None)
             if slot and not is_battery(name):  # vent… : lignes regroupées, valeurs maximales de la fenêtre
@@ -861,9 +930,18 @@ def build():
                         values = now_v if zero["when"] == "current" else floats(series)
                         if values and all(v == 0 for v in values):
                             line = None
-                    if line and dev in vac_devs and line.endswith("(stable)"):
-                        # aspirateur : seulement le total des missions et ce qui a varié sur la fenêtre
-                        line = line.replace("(stable)", "(-)") if "total missions" in norm(name) else None
+                    if dev in vac_devs:
+                        # aspirateur : seulement les compteurs de missions, avec leur variation entre parenthèses ; ceux qui n'ont pas
+                        # varié sont masqués, sauf le total qui est toujours là ; le reste (durées…) n'est pas dans le résumé
+                        v, low = floats(series), norm(name)
+                        if "missions" in low and v:
+                            delta = v[-1] - v[0]
+                            if delta:
+                                line = f"{label} : {v[-1]:g} ({delta:+g})"
+                            else:
+                                line = f"{label} : {v[-1]:g} (-)" if "total missions" in low else None
+                        else:
+                            line = None
                 key = "📈 Capteurs"
             elif dom == "binary_sensor":
                 line = alert_line(label, series)
@@ -935,19 +1013,27 @@ def build():
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
                  f"{'s' if len(skipped) > 1 else ''} (données illisibles, détail dans run.log) : {shown}")
-    return text + power_text()
+    png, caption = None, ""
+    if chart_series:
+        text, png, caption = attach_chart(text, chart_series)
+    return text + power_text(), png, caption
 
 
-def send(text, owner_only=False, also=None):
-    """Envoie au chat du propriétaire, puis aux chats `also` (celui d'où une commande a été lancée : suites d'une commande dans un
-    groupe), puis à ceux de « telegram_notify_chats » (sauf `owner_only`, qui n'écrit qu'au propriétaire).
-    Seul un échec vers le chat du propriétaire est une erreur : un groupe injoignable ne bloque rien."""
+def _chats(owner_only, also):
     primary = str(CFG["telegram_chat_id"])
     chats = [primary]
     if not owner_only:
         for c in [*(also or []), *id_list(CFG.get("telegram_notify_chats"))]:
             if c is not None and str(c) not in chats:
                 chats.append(str(c))
+    return primary, chats
+
+
+def send(text, owner_only=False, also=None):
+    """Envoie au chat du propriétaire, puis aux chats `also` (celui d'où une commande a été lancée : suites d'une commande dans un
+    groupe), puis à ceux de « telegram_notify_chats » (sauf `owner_only`, qui n'écrit qu'au propriétaire).
+    Seul un échec vers le chat du propriétaire est une erreur : un groupe injoignable ne bloque rien."""
+    primary, chats = _chats(owner_only, also)
     for chat in chats:
         try:
             _send_to(chat, text)
@@ -955,6 +1041,37 @@ def send(text, owner_only=False, also=None):
             if chat == primary:
                 raise
             print(f"envoi vers {chat} KO : {type(e).__name__}: {e}", file=sys.stderr)
+
+
+def send_photo(png, caption, owner_only=False, also=None):
+    """Envoie une image PNG (sendPhoto) aux mêmes chats que `send`. Une erreur n'est jamais fatale : l'image est un plus."""
+    primary, chats = _chats(owner_only, also)
+    for chat in chats:
+        try:
+            _send_photo_to(chat, png, caption)
+        except Exception as e:
+            print(f"envoi du graphique vers {chat} KO : {type(e).__name__}: {e}", file=sys.stderr)
+
+
+def _send_photo_to(chat_id, png, caption):
+    import uuid
+    b = uuid.uuid4().hex
+    field = lambda name, val: (f"--{b}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n").encode() + val.encode() + b"\r\n"
+    body = (field("chat_id", str(chat_id)) + field("caption", caption[:1000])
+            + (f"--{b}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"temperatures.png\"\r\n"
+               "Content-Type: image/png\r\n\r\n").encode() + png + b"\r\n" + f"--{b}--\r\n".encode())
+    for attempt in (1, 2, 3):
+        try:
+            http(f"https://api.telegram.org/bot{CFG['telegram_token']}/sendPhoto",
+                 headers={"Content-Type": f"multipart/form-data; boundary={b}"}, data=body)
+            return
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == 3:
+                raise
+        except OSError:
+            if attempt == 3:
+                raise
+        time.sleep(SEND_RETRY_DELAY)
 
 
 def _send_to(chat_id, text):
@@ -982,14 +1099,21 @@ def main():
     except ValueError:
         git_bytes = 0
     if "--dry" in sys.argv:
-        print(build())
+        text, png, caption = build_report()
+        print(text)
+        if png:
+            Path("temperatures.png").write_bytes(png)
+            print(f"\n[graphique écrit dans temperatures.png]\n{caption}")
         return
     if not load_state()["monitor"]:
         heartbeat()  # le script a bien tourné, il est juste en pause (/stop monitor)
         log_net("summary", git_bytes)
         return
     try:
-        send(build())
+        text, png, caption = build_report()
+        send(text)
+        if png:
+            send_photo(png, caption)
     except Exception:
         err = traceback.format_exc()
         print(err, file=sys.stderr)

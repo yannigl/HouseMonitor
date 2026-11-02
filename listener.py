@@ -187,6 +187,14 @@ def ping_stamp(result, now):
     return now - PING_EVERY + PING_RETRY if result is False else now
 
 
+def send_chart(chat_id, png, caption):
+    """Graphique envoyé APRÈS la réponse, au chat d'où la commande est partie seulement."""
+    try:
+        summary._send_photo_to(chat_id, png, caption)
+    except Exception as e:
+        print(f"graphique non envoyé à {chat_id} : {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+
+
 def code_signature():
     """Dates de modification de tous les .py : le listener importe arm, summary, vacuum… et doit redémarrer si l'un change."""
     return tuple(sorted((p.name, p.stat().st_mtime) for p in HERE.glob("*.py")))
@@ -416,7 +424,12 @@ def handle(text, st, role="admin", chat_id=None):
         if cmd == "/update":
             if parts[1:2] == ["all"]:
                 return summary.all_states_text()
-            return summary.all_states_text(" ".join(parts[1:])) if parts[1:] else summary.build()
+            if parts[1:]:
+                return summary.all_states_text(" ".join(parts[1:]))
+            text, png, caption = summary.build_report()
+            if not png:
+                return text
+            return text, lambda tg, offset: send_chart(chat_id if chat_id is not None else CHAT_ID, png, caption)
     except Exception as e:
         return f"❌ Home Assistant : {e}"
     return f"❓ Commande inconnue : {text.split()[0] if parts else ''}\n\n" + HELP

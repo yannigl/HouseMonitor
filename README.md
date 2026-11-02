@@ -98,6 +98,14 @@ journalctl -u housemonitor-listener -f       # logs en direct
 (Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
 
+### Résumé du matin : graphique des températures
+Au lieu d'une ligne par capteur, les températures (tous les capteurs en °C ou °F, convertis en °C ; hors point de rosée, ressenti, windchill) sont
+dessinées sur **une image** envoyée après le texte, avec **tous les relevés** des dernières 24 h et une courbe de couleur par capteur (8 au plus). La légende du message
+donne pour chaque capteur une pastille de la couleur de sa courbe, le minimum, le maximum et la valeur actuelle (et la plage de rosée pour la température intérieure
+de la station météo). L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib), envoyée par `/update` au chat d'où la commande est
+partie. `"summary": {"temperature_chart": false}` revient aux lignes de texte ; si le dessin échoue, la légende passe dans le texte.
+`python3 summary.py --dry` écrit l'image dans `temperatures.png`.
+
 ### Résumé du matin : alimentation du Pi
 Une ligne `⚡ Alimentation du Pi : N alertes de sous-tension sur 24 h, dernière à HHhMM` est ajoutée au résumé et à `/update`
 (compte les « Under-voltage detected » du journal du noyau, `journalctl -k`). Le journal étant volatil, la fenêtre ne remonte pas
@@ -115,8 +123,9 @@ Un appareil qui n'émet que sur événement (porte, mouvement, bouton) n'est jam
 - **🛡 Détecteurs / caméras** : les entités de la config `arm` (groupes et surnoms), les caméras et les détecteurs de mouvement
   (nom contenant motion, mouvement, pir, camera, détecteur, présence) y sont regroupés avec leur appareil. Une entité armable
   affiche son état (`armé` / `désarmé`) et ses changements sur la fenêtre.
-- **Aspirateur** (appareil ayant une entité `vacuum.*`, ex. Roomba) : seule la ligne « Total missions » est toujours affichée,
-  avec `(-)` si elle n'a pas varié ; les autres lignes n'apparaissent que si leur valeur a changé sur 24 h.
+- **Aspirateur** (appareil ayant une entité `vacuum.*`, ex. Roomba) : seulement les alertes qui ont eu lieu (`Bin full : 1 alerte (12h15)`) et les compteurs
+  de missions qui ont varié, avec leur variation entre parenthèses (`Successful missions : 100 (+1)`), puis `Total missions : 164 (+1)` (ou `(-)` s'il n'a pas
+  varié ; toujours présent). Les durées (temps de ménage…) ne figurent pas dans le résumé.
 - **Section « 📡 Data »** : les volumes de données du routeur 4G (Downloaded/Uploaded data, issus des débits) sont rangés dans leur propre
   section, non dans « Appareils ». Elle contient aussi « ■ Calcul data Pi » (data du script et du Pi depuis le début du cycle, comme `/data`), présenté comme
   un appareil, avec les mêmes sous-puces et sans ligne vide ; il est aussi dans `/update`.
