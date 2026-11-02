@@ -816,44 +816,55 @@ def temperature_points(series):
     return pts
 
 
+def sensor_key(label, dev, labels):
+    """Capteur physique d'une courbe, pour que sa couleur soit la même sur les trois graphiques. `label` : nom du capteur sans la grandeur,
+    `dev` : son appareil, `labels` : tous les libellés. Ex. chez Ecowitt : « Weather Station » (humidité sans qualificatif) = « Weather Station Outdoor » ;
+    « Weather Station Absolute » / « … Relative » (pression, baromètre de la console) = « Weather Station Indoor »."""
+    if label.split()[-1:] and label.split()[-1].lower() in ("absolute", "relative", "atmospheric"):
+        return f"{dev} Indoor" if f"{dev} Indoor" in labels else dev
+    if label == dev and f"{dev} Outdoor" in labels:
+        return f"{dev} Outdoor"
+    return label
+
+
 def attach_chart(text, chart_data):
-    """Dessine les graphiques (un par grandeur, les uns sous les autres) et prépare la légende : une couleur par appareil, la même sur tous
-    les graphiques, donc une seule liste de pastilles. En cas d'échec du dessin, les valeurs passent dans le texte. -> (texte, png ou None, légende)."""
+    """Dessine les graphiques (un par grandeur, les uns sous les autres) et prépare la légende : une pastille = un capteur, de la même couleur
+    sur les trois graphiques. En cas d'échec du dessin, les valeurs passent dans le texte. -> (texte, png ou None, légende)."""
     import chart  # import tardif : le dessin n'est utile qu'ici
     now = datetime.now()
-    sources = sorted({d[3] for data in chart_data.values() for d in data}, key=str.lower)
-    color = {src: chart.PALETTE[i] for i, src in enumerate(sources[:len(chart.PALETTE)])}  # au-delà de 8 appareils : pas de courbe
-    panels, fallback, notes = [], [], {}
+    labels = {d[0] for data in chart_data.values() for d in data}
+    keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2]) for d in data] for m, data in chart_data.items()}
+    sources = sorted({k[0] for data in keyed.values() for k in data}, key=str.lower)
+    color = {src: chart.PALETTE[i] for i, src in enumerate(sources[:len(chart.PALETTE)])}  # au-delà de 8 capteurs : pas de courbe
+    panels, fallback, notes, styles = [], [], {}, {}
     for metric in ("temperature", "pressure", "humidity"):
-        data = sorted(chart_data.get(metric, []), key=lambda d: d[0].lower())
+        data = sorted(keyed.get(metric, []), key=lambda d: d[0].lower())
         if not data:
             continue
         unit = CHART_TITLES[metric][2]
-        series, seen = [], {}
-        for label, pts, note, src in data:
+        series = []
+        for src, label, pts, note in data:
             vals = [v for _, v in pts]
             fallback.append(f"• {label} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
             if note:
                 notes[src] = note
             if src not in color:
                 continue
-            style = next((st for st in CHART_STYLES if st["match"] in norm(label)), {})
-            seen[src] = seen.get(src, 0) + 1
-            # deux courbes du même appareil dans un graphique : la seconde est en pointillés fins pour les distinguer
-            dashed = DASH_FINE if seen[src] > 1 and not (style.get("bold") or style.get("dashed")) else style.get("dashed", False)
-            series.append((color[src][1], pts, style.get("bold", False), dashed))
+            style = next((st for st in CHART_STYLES if st["match"] in norm(src)), {})
+            styles[src] = style
+            series.append((color[src][1], pts, style.get("bold", False), style.get("dashed", False)))
         panels.append({"unit": unit, "series": series, "ref": CHART_REF.get(metric), "clamp": (0, 100) if metric == "humidity" else None})
-    legend = [f"{color[src][0]} {src}" + (f" (rosée {notes[src]})" if src in notes else "") for src in sources if src in color]
-    legend += [f"• {src}" for src in sources if src not in color]  # sans couleur : plus de 8 appareils
+    def hint(src):
+        st = styles.get(src, {})
+        return " — trait épais" if st.get("bold") else " — pointillés" if st.get("dashed") else ""
+    legend = [f"{color[src][0]} {src}{hint(src)}" + (f" (rosée {notes[src]})" if src in notes else "") for src in sources if src in color]
+    legend += [f"• {src}" for src in sources if src not in color]  # sans couleur : plus de 8 capteurs
     caption = "\n".join(legend)[:1000]
     try:
         return text, chart.render(panels, now - timedelta(hours=HOURS), now), caption
     except Exception as e:
         print(f"graphique impossible : {type(e).__name__}: {e}", file=sys.stderr)
         return text + "\n\n📈 Mesures (graphique indisponible)\n" + "\n".join(fallback), None, ""
-
-
-DASH_FINE = (3, 4)
 
 
 def build(with_chart=False):
