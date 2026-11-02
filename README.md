@@ -98,13 +98,18 @@ journalctl -u housemonitor-listener -f       # logs en direct
 (Adaptez `User=` et les chemins dans le `.service` si vous n'êtes pas l'utilisateur `pi`.)
 Le listener se relance tout seul quand le `git pull` du matin modifie `listener.py`.
 
-### Résumé du matin : graphique des températures
-Au lieu d'une ligne par capteur, les températures (tous les capteurs en °C ou °F, convertis en °C ; hors point de rosée, ressenti, windchill) sont
-dessinées sur **une image** envoyée après le texte, avec **tous les relevés** des dernières 24 h et une courbe de couleur par capteur (8 au plus). La légende du message
-donne pour chaque capteur une pastille de la couleur de sa courbe et son nom (et la plage de rosée pour la température intérieure de la station météo) ;
-`"chart_values": true` y ajoute le minimum, le maximum et la valeur actuelle. L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib), envoyée par `/update` au chat d'où la commande est
-partie. `"summary": {"temperature_chart": false}` revient aux lignes de texte ; si le dessin échoue, la légende passe dans le texte.
-`python3 summary.py --dry` écrit l'image dans `temperatures.png`.
+### Résumé du matin : graphiques (températures, pression, humidité)
+Au lieu d'une ligne par capteur, les températures (capteurs en °C ou °F, convertis en °C ; hors point de rosée, ressenti, windchill), les pressions (hPa,
+hors déficit de pression de vapeur) et les humidités (%) sont dessinées sur **une seule image à trois graphiques les uns sous les autres**, envoyée après le texte :
+tous les relevés des dernières 24 h, une courbe de couleur par capteur (8 au plus par graphique, mêmes couleurs d'un graphique à l'autre mais sans lien entre
+elles), avec 1013 hPa en repère pointillé sur le graphique de pression. La légende du message donne, pour chaque graphique, une pastille de la couleur de la courbe et le
+nom du capteur (et la plage de rosée pour la température intérieure de la station météo).
+- Styles : `"chart_styles": [{"match": "outdoor", "bold": true}, {"match": "grenier", "dashed": true}]` (défaut) : les courbes dont le nom contient « outdoor » sont
+  en gras, celles qui contiennent « grenier » en pointillés.
+- `"chart_metrics": ["temperature", "pressure", "humidity"]` (défaut) : grandeurs dessinées ; celles qui ne sont pas listées restent en lignes de texte.
+  `"temperature_chart": false` supprime les graphiques. `"chart_values": true` ajoute minimum, maximum et valeur actuelle à la légende.
+- L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib) et envoyée par `/update` au chat d'où la commande est partie. Si le dessin échoue, les valeurs
+  passent dans le texte. `python3 summary.py --dry` écrit l'image dans `temperatures.png`.
 
 ### Résumé du matin : alimentation du Pi
 Une ligne `⚡ Alimentation du Pi : N alertes de sous-tension sur 24 h, dernière à HHhMM` est ajoutée au résumé et à `/update`

@@ -9,7 +9,7 @@ import struct
 import zlib
 from datetime import timedelta
 
-W, H = 1000, 560
+W = 1000
 LEFT, RIGHT, TOP, BOTTOM = 64, 18, 18, 44
 # (pastille Telegram, couleur RVB) : les 8 premiers capteurs ont une courbe
 PALETTE = [("🔴", (220, 50, 47)), ("🔵", (38, 139, 210)), ("🟢", (46, 160, 67)), ("🟠", (245, 135, 0)),
@@ -24,6 +24,9 @@ GLYPHS = {
     "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"], "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
     ":": ["00000", "00100", "00100", "00000", "00100", "00100", "00000"], ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
     "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+    "%": ["11001", "11010", "00010", "00100", "01000", "01011", "10011"], "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+    "h": ["10000", "10000", "10110", "11001", "10001", "10001", "10001"], "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+    "a": ["00000", "00000", "01110", "00001", "01111", "10001", "01111"], "°": ["01100", "10010", "10010", "01100", "00000", "00000", "00000"],
 }
 
 
@@ -53,6 +56,25 @@ class Canvas:
                 t = 0.0 if length2 == 0 else max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / length2))
                 d = math.hypot(x - (x0 + t * dx), y - (y0 + t * dy))
                 self.blend(x, y, color, max(0.0, min(1.0, width / 2 + 0.5 - d)))
+
+    def polyline(self, pp, color, width=2.2, dash=None):
+        """Courbe passant par les points `pp` ; `dash` = (trait, espace) en pixels pour des pointillés (le motif continue d'un segment à l'autre)."""
+        phase = 0.0
+        for (ax, ay), (bx, by) in zip(pp, pp[1:]):
+            if not dash:
+                self.line(ax, ay, bx, by, color, width)
+                continue
+            seg = math.hypot(bx - ax, by - ay)
+            on, off = dash
+            pos = 0.0
+            while pos < seg:
+                p = phase % (on + off)
+                run = min((on - p) if p < on else (on + off - p), seg - pos)
+                if p < on and run > 0:
+                    f0, f1 = pos / seg, (pos + run) / seg
+                    self.line(ax + (bx - ax) * f0, ay + (by - ay) * f0, ax + (bx - ax) * f1, ay + (by - ay) * f1, color, width)
+                pos += max(run, 0.5)
+                phase += max(run, 0.5)
 
     def text(self, x, y, s, color=(70, 70, 70), scale=2, anchor="left"):
         width = len(s) * 6 * scale
@@ -86,36 +108,56 @@ def nice_step(span, target=6):
     return 10 * mag
 
 
-def render(series, start, end, hour_fmt=lambda t: f"{t:%H:%M}"):
-    """`series` : [(couleur RVB, [(datetime, valeur), ...])] ; `start`, `end` : bornes de l'axe du temps. -> octets PNG."""
-    pts = [v for _, p in series for _, v in p]
-    lo, hi = min(pts), max(pts)
-    step = nice_step(max(hi - lo, 2.0))
-    ymin, ymax = math.floor((lo - 0.3) / step) * step, math.ceil((hi + 0.3) / step) * step
-    c = Canvas(W, H)
-    x0, x1, y0, y1 = LEFT, W - RIGHT, TOP, H - BOTTOM
+PANEL_H, PANEL_GAP = 290, 24
+WIDTH_NORMAL, WIDTH_BOLD, DASH = 2.2, 4.8, (11, 7)
+
+
+def render(panels, start, end):
+    """Plusieurs graphiques les uns sous les autres, sur le même axe de temps.
+    `panels` : [{"unit": "°C", "series": [(couleur RVB, [(datetime, valeur), ...], gras, pointillés)], "ref": repère ou None, "clamp": (min, max) ou None}].
+    -> octets PNG."""
+    panels = [p for p in panels if p["series"]]
+    height = len(panels) * (PANEL_H + PANEL_GAP) + BOTTOM
+    c = Canvas(W, height)
+    x0, x1 = LEFT, W - RIGHT
     total = (end - start).total_seconds()
     px = lambda t: x0 + (t - start).total_seconds() / total * (x1 - x0)
-    py = lambda v: y1 - (v - ymin) / (ymax - ymin) * (y1 - y0)
     grid, axis = (225, 225, 225), (120, 120, 120)
-    v = ymin
-    while v <= ymax + 1e-9:  # lignes horizontales et valeurs
-        y = int(py(v))
-        c.rect(x0, y, x1, y, grid)
-        c.text(x0 - 8, y - 7, f"{v:g}", anchor="right")
-        v += step
-    first = start.replace(minute=0, second=0, microsecond=0)
-    t = first
-    while t <= end:  # lignes verticales toutes les 3 heures
-        if t >= start and t.hour % 3 == 0:
-            x = int(px(t))
-            c.rect(x, y0, x, y1, grid)
-            c.text(x, y1 + 10, hour_fmt(t), anchor="center")
-        t = t + timedelta(hours=1)
-    c.rect(x0, y0, x0, y1, axis)
-    c.rect(x0, y1, x1, y1, axis)
-    for color, points in series:
-        pp = [(px(t), py(v)) for t, v in points]
-        for (ax, ay), (bx, by) in zip(pp, pp[1:]):
-            c.line(ax, ay, bx, by, color)
+    for n, panel in enumerate(panels):
+        y0 = n * (PANEL_H + PANEL_GAP) + PANEL_GAP
+        y1 = y0 + PANEL_H - 6
+        vals = [v for _, pts, _, _ in panel["series"] for _, v in pts]
+        if panel.get("ref") is not None:
+            vals.append(panel["ref"])
+        lo, hi = min(vals), max(vals)
+        step = nice_step(max(hi - lo, 2.0), 5)
+        ymin, ymax = math.floor((lo - 0.3) / step) * step, math.ceil((hi + 0.3) / step) * step
+        if panel.get("clamp"):
+            ymin, ymax = max(ymin, panel["clamp"][0]), min(ymax, panel["clamp"][1])
+        py = lambda v: y1 - (v - ymin) / (ymax - ymin) * (y1 - y0)
+        v = ymin
+        while v <= ymax + 1e-9:  # lignes horizontales et valeurs
+            y = int(py(v))
+            c.rect(x0, y, x1, y, grid)
+            c.text(x0 - 8, y - 7, f"{v:g}", anchor="right")
+            v += step
+        t = start.replace(minute=0, second=0, microsecond=0)
+        while t <= end:  # lignes verticales toutes les 3 heures ; les heures sont écrites sous le dernier graphique
+            if t >= start and t.hour % 3 == 0:
+                x = int(px(t))
+                c.rect(x, y0, x, y1, grid)
+                if n == len(panels) - 1:
+                    c.text(x, y1 + 10, f"{t:%H:%M}", anchor="center")
+            t = t + timedelta(hours=1)
+        c.rect(x0, y0, x0, y1, axis)
+        c.rect(x0, y1, x1, y1, axis)
+        c.rect(x0 + 3, y0 + 2, x0 + 8 + len(panel["unit"]) * 18 + 4, y0 + 30, (255, 255, 255))  # fond blanc : l'unité reste lisible sous une courbe
+        c.text(x0 + 8, y0 + 4, panel["unit"], color=(40, 40, 40), scale=3)
+        if panel.get("ref") is not None and ymin <= panel["ref"] <= ymax:  # repère (1013 hPa) : pointillés sombres
+            yr = py(panel["ref"])
+            c.polyline([(x0, yr), (x1, yr)], (60, 60, 60), 1.6, (6, 5))
+            c.text(x1 - 6, int(yr) - 16, f"{panel['ref']:g}", color=(60, 60, 60), anchor="right")
+        for color, points, bold, dashed in panel["series"]:
+            pp = [(px(t), py(max(ymin, min(ymax, v)))) for t, v in points]
+            c.polyline(pp, color, WIDTH_BOLD if bold else WIDTH_NORMAL, DASH if dashed else None)
     return c.png()

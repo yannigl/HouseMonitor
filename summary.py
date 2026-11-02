@@ -766,7 +766,13 @@ def power_text():
 
 NOT_TEMPERATURE = ("dew", "feels", "windchill", "wind chill", "heat index", "apparent", "rosee")
 CHART = _SUM.get("temperature_chart", True)
-CHART_VALUES = _SUM.get("chart_values", False)  # minimum, maximum et valeur actuelle dans la légende du graphique
+CHART_VALUES = _SUM.get("chart_values", False)  # minimum, maximum et valeur actuelle dans la légende des graphiques
+CHART_METRICS = _SUM.get("chart_metrics", ["temperature", "pressure", "humidity"])  # grandeurs dessinées (et retirées du texte)
+CHART_REF = {"pressure": 1013}  # repère tracé sur le graphique de pression (hPa)
+# Style des courbes dont le libellé contient le texte : gras et/ou pointillés
+CHART_STYLES = [{"match": norm(x["match"]), "bold": x.get("bold", False), "dashed": x.get("dashed", False)}
+                for x in _SUM.get("chart_styles", [{"match": "outdoor", "bold": True}, {"match": "grenier", "dashed": True}])]
+CHART_TITLES = {"temperature": ("🌡", "Températures", "°C"), "pressure": ("🧭", "Pression", "hPa"), "humidity": ("💧", "Humidité", "%")}
 
 
 def is_temperature(name, unit):
@@ -774,16 +780,30 @@ def is_temperature(name, unit):
     return unit in ("°C", "°F") and "temperature" in low and not any(w in low for w in NOT_TEMPERATURE)
 
 
-def temperature_label(name):
+def chart_metric(name, unit):
+    """« temperature », « pressure » ou « humidity » si le capteur va dans un graphique, sinon None."""
+    low = norm(name)
+    if is_temperature(name, unit):
+        return "temperature"
+    if unit in ("hPa", "mbar", "mb") and "pressure" in low and not any(w in low for w in ("deficit", "vapour", "vapor")):
+        return "pressure"
+    if unit == "%" and "humidity" in low:
+        return "humidity"
+    return None
+
+
+def chart_label(name, metric):
+    """Nom du capteur sans le mot de la grandeur (« Weather Station Indoor Temperature » -> « Weather Station Indoor »)."""
+    word = {"temperature": ("temperature", "température"), "pressure": ("pressure",), "humidity": ("humidity",)}[metric]
     base = name.strip()
-    for tail in (" Temperature", " temperature", " Température", " température"):
-        if base.endswith(tail):
-            base = base[: -len(tail)]
+    for w in word:
+        if base.lower().endswith(" " + w):
+            base = base[: -len(w) - 1].strip()
     return base or name
 
 
 def temperature_points(series):
-    """[(heure locale, valeur °C)] sur la fenêtre, tous les relevés, prolongés jusqu'à maintenant (la dernière valeur reste vraie)."""
+    """[(heure locale, valeur)] sur la fenêtre, tous les relevés, prolongés jusqu'à maintenant (la dernière valeur reste vraie)."""
     now = datetime.now()
     start = now - timedelta(hours=HOURS)
     pts = []
@@ -797,27 +817,37 @@ def temperature_points(series):
     return pts
 
 
-def attach_chart(text, chart_series):
-    """Dessine le graphique et prépare sa légende. En cas d'échec du dessin, la légende (minimum, maximum, actuel) passe dans le texte."""
+def attach_chart(text, chart_data):
+    """Dessine les graphiques (un par grandeur, les uns sous les autres) et prépare la légende. En cas d'échec du dessin, les valeurs
+    (minimum, maximum, actuel) passent dans le texte. -> (texte, png ou None, légende)."""
     import chart  # import tardif : le dessin n'est utile qu'ici
     now = datetime.now()
-    shown = sorted(chart_series, key=lambda s: s[0].lower())
-    lines = ["🌡 Températures sur %d h" % HOURS]
-    colored = []
-    for i, (label, pts, note) in enumerate(shown):
-        vals = [v for _, v in pts]
-        dot = chart.PALETTE[i][0] if i < len(chart.PALETTE) else "•"
-        if i < len(chart.PALETTE):
-            colored.append((chart.PALETTE[i][1], pts))
-        values = f" : {min(vals):g} → {max(vals):g} °C, actuel {vals[-1]:g}" if CHART_VALUES else ""
-        extra = f" (rosée {note})" if note else ""
-        lines.append(f"{dot} {label}{values}{extra}")
-    caption = "\n".join(lines)[:1000]
+    panels, blocks, fallback = [], [], []
+    for metric in ("temperature", "pressure", "humidity"):
+        data = sorted(chart_data.get(metric, []), key=lambda s: s[0].lower())
+        if not data:
+            continue
+        emoji, title, unit = CHART_TITLES[metric]
+        ref = CHART_REF.get(metric)
+        lines = [f"{emoji} {title} ({unit}" + (f", repère {ref:g}" if ref else "") + ")"]
+        series = []
+        for i, (label, pts, note) in enumerate(data):
+            vals = [v for _, v in pts]
+            dot = chart.PALETTE[i][0] if i < len(chart.PALETTE) else "•"
+            style = next((st for st in CHART_STYLES if st["match"] in norm(label)), {})
+            if i < len(chart.PALETTE):
+                series.append((chart.PALETTE[i][1], pts, style.get("bold", False), style.get("dashed", False)))
+            values = f" : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}" if CHART_VALUES else ""
+            lines.append(f"{dot} {label}{values}" + (f" (rosée {note})" if note else ""))
+            fallback.append(f"• {label} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
+        panels.append({"unit": unit, "series": series, "ref": ref, "clamp": (0, 100) if metric == "humidity" else None})
+        blocks.append("\n".join(lines))
+    caption = "\n\n".join(blocks)[:1000]
     try:
-        return text, chart.render(colored, now - timedelta(hours=HOURS), now), caption
+        return text, chart.render(panels, now - timedelta(hours=HOURS), now), caption
     except Exception as e:
         print(f"graphique impossible : {type(e).__name__}: {e}", file=sys.stderr)
-        return text + "\n\n" + "\n".join(l.lstrip("🔴🔵🟢🟠🟣🟤🟡⚫• ") for l in lines), None, ""
+        return text + "\n\n📈 Mesures (graphique indisponible)\n" + "\n".join(fallback), None, ""
 
 
 def build(with_chart=False):
@@ -853,7 +883,7 @@ def build_report(with_chart=True):
     det_devs = {dmap[e]["d"] for e, (n, _) in ents.items() if (dmap.get(e) or {}).get("d") and is_detector(e, n, armed)}
     vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
     silent_ids = {r[3] for r in silent_rows}
-    chart_series = [] if with_chart else None  # (libellé, [(heure, valeur)], note) des capteurs de température
+    chart_data = {m: [] for m in CHART_METRICS} if with_chart else None  # grandeur -> [(libellé, [(heure, valeur)], note)]
     groups = defaultdict(list)  # appareil -> ses lignes
     det_groups = defaultdict(list)  # appareil de détection -> ses lignes
     data_groups = defaultdict(list)  # appareil (routeur 4G…) -> ses lignes de volume de données
@@ -881,9 +911,20 @@ def build_report(with_chart=True):
                         break
     blocks = defaultdict(dict)  # (appareil, nom, titre) -> {rang: (libellé, unité, série, mode, état actuel, nom, entity_id)}
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
-        if eid in absorbed or eid in annexes or any(h in norm(name) for h in HIDE_NAMES):
+        if eid in absorbed or eid in annexes:
             continue
         if (dmap.get(eid) or {}).get("d") in silent_ids:
+            continue
+        if chart_data is not None and eid.startswith("sensor."):  # température, pression, humidité : dans les graphiques, pas dans le texte
+            metric = chart_metric(name, unit)
+            if metric in chart_data:
+                s2, u2 = to_celsius(hist.get(eid, []), unit)
+                pts = temperature_points(s2)
+                if pts:
+                    note = annotations.get(eid)
+                    chart_data[metric].append((chart_label(name, metric), pts, note[2] if note and note[2] else ""))
+                continue
+        if any(h in norm(name) for h in HIDE_NAMES):
             continue
         if (dmap.get(eid) or {}).get("d") in vac_devs and eid.startswith("binary_sensor.") and "charging" in norm(name):
             continue  # « Charging » du Roomba : pas une alerte utile
@@ -898,12 +939,6 @@ def build_report(with_chart=True):
         detector = is_detector(eid, name, armed) or dev in det_devs
         if dom == "sensor":
             series, unit = to_celsius(series, unit)
-            if chart_series is not None and is_temperature(name, unit):  # va dans le graphique, pas dans le texte
-                pts = temperature_points(series)
-                if pts:
-                    note = annotations.get(eid)
-                    chart_series.append((temperature_label(name), pts, note[2] if note and note[2] else ""))
-                continue
             slot = next(((b["title"], i, ln) for b in BLOCKS for i, ln in enumerate(b["lines"])
                          if ln["match"] in norm(name)), None)
             if slot and not is_battery(name):  # vent… : lignes regroupées, valeurs maximales de la fenêtre
@@ -1018,8 +1053,8 @@ def build_report(with_chart=True):
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
                  f"{'s' if len(skipped) > 1 else ''} (données illisibles, détail dans run.log) : {shown}")
     png, caption = None, ""
-    if chart_series:
-        text, png, caption = attach_chart(text, chart_series)
+    if chart_data and any(chart_data.values()):
+        text, png, caption = attach_chart(text, chart_data)
     return text + power_text(), png, caption
 
 
