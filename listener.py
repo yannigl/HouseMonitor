@@ -399,7 +399,7 @@ def handle(text, st, role="admin", chat_id=None):
         if cmd == "/rearm":
             return alerts.rearm()
         if cmd == "/graph":
-            if args and args[0] in ("help", "aide", "?"):
+            if not args or args[0] in ("help", "aide", "?"):  # sans argument : la syntaxe ; « /graph d » donne le graphique par défaut (24 h)
                 return summary.GRAPH_USAGE
 
             def graph_after(tg, offset, args=list(args), target=chat_id if chat_id is not None else CHAT_ID):

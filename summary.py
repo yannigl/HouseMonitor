@@ -895,8 +895,8 @@ PERIOD_WORDS = {"jour": "d", "day": "d", "semaine": "w", "week": "w", "mois": "m
                 "wtd": "wtd", "mtd": "mtd", "ytd": "ytd", "1d": "d", "7d": "w", "30d": "m", "365d": "y"}
 METRIC_WORDS = {"temperature": "temperature", "temp": "temperature", "pression": "pressure", "pressure": "pressure",
                 "humidity": "humidity", "humidite": "humidity"}
-GRAPH_USAGE = ("📈 /graph [période] [grandeur]\n• période : d (24 h, défaut), w (7 j), m (30 j), y (12 mois), wtd / mtd / ytd (depuis lundi / le début du mois / de "
-               "l'année)\n• grandeur : temperature, pression ou humidity (une seule ; sans mot, les trois)\nEx. /graph w · /graph mtd pression · /graph temperature")
+GRAPH_USAGE = ("📈 /graph <période> [grandeur]\n• période : d (24 h, comme dans le résumé), w (7 j), m (30 j), y (12 mois), wtd / mtd / ytd (depuis lundi / le début du mois / de "
+               "l'année)\n• grandeur : temperature, pression ou humidity (une seule ; sans mot, les trois)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature")
 
 
 def graph_report(args):

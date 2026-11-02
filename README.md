@@ -113,10 +113,10 @@ intérieures, pressions absolue et relative) sont deux capteurs, donc deux coule
   passent dans le texte. `python3 summary.py --dry` écrit l'image dans `temperatures.png`.
 
 ### Graphiques à la demande (`/graph`)
-`/graph` renvoie le même graphique que le résumé du matin (température, pression, humidité, une pastille par capteur), sur la période et la grandeur demandées. Autorisé aux membres du groupe.
-- **Période** (24 h par défaut) : `d` (24 heures), `w` (7 jours), `m` (30 jours), `y` (12 mois) ; `wtd`, `mtd`, `ytd` : depuis lundi, depuis le début du mois, depuis le 1er janvier
+`/graph` seul rappelle la syntaxe ; `/graph d` renvoie le graphique du résumé du matin (24 h) (température, pression, humidité, une pastille par capteur), sur la période et la grandeur demandées. Autorisé aux membres du groupe.
+- **Période** (`d` = 24 h, comme dans le résumé) : `d` (24 heures), `w` (7 jours), `m` (30 jours), `y` (12 mois) ; `wtd`, `mtd`, `ytd` : depuis lundi, depuis le début du mois, depuis le 1er janvier
   (« to date »). Aussi : jour, semaine, mois, an.
-- **Grandeur** (les trois par défaut) : `temperature`, `pression` ou `humidity` (une seule). Exemples : `/graph`, `/graph w`, `/graph mtd pression`, `/graph temperature`, `/graph ytd humidity`.
+- **Grandeur** (les trois par défaut) : `temperature`, `pression` ou `humidity` (une seule). Exemples : `/graph d`, `/graph w`, `/graph mtd pression`, `/graph d temperature`, `/graph ytd humidity` (un mot de grandeur sans période = 24 h).
 - L'axe du temps s'adapte : heures (jusqu'à 36 h), jours (`JJ/MM`), puis mois (`MM/AA`). Au-delà de 36 h, les relevés sont moyennés par paquets (700 points au plus par courbe).
 - **Limite : HA ne garde l'historique que 10 jours par défaut** (`recorder: purge_keep_days`). Pour `m`, `y`, `ytd` ou `mtd` tard dans le mois, la courbe commence à la date de
   l'historique disponible et la légende le dit (« HA ne remonte que jusqu'au … »). Une conservation plus longue demande de régler `purge_keep_days` dans la configuration de HA
