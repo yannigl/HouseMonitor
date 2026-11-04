@@ -34,7 +34,10 @@ _SUM = CFG.get("summary", {})
 # Résumé du matin seulement (/update all et /update <mot> montrent tout) :
 HIDE_NAMES = [norm(x) for x in _SUM.get("hide", [  # capteurs masqués : texte contenu dans le nom de l'entité
     "dewpoint", "hourly rain", "rain rate", "relative pressure", "solar lux", "solar radiation", "total rain",
-    "vapour pressure deficit", "weekly rain", "yearly rain", "feels like"])]
+    "vapour pressure deficit", "weekly rain", "yearly rain", "feels like", "windchill", "wind chill"])]
+# Alertes ignorées tant qu'il y en a moins que `min` sur la fenêtre (ex. « Connectivity » : une ou deux micro-coupures ne méritent pas une ligne)
+MIN_ALERTS = [{"match": norm(m["match"]), "min": m.get("min", 3)}
+              for m in _SUM.get("min_alerts", [{"match": "connectivity", "min": 3}])]
 # Blocs de lignes qui restent groupées, dans cet ordre. Modes : « line » = la ligne habituelle (variation et heures),
 # « max » = valeur maximale sur la fenêtre et son heure, « current » = valeur actuelle seulement,
 # « yesterday » = valeur maximale de la veille (minuit à minuit), « yesterday_changed » = idem, seulement si elle diffère de celle d'avant-hier.
@@ -766,14 +769,34 @@ def power_text():
 
 NOT_TEMPERATURE = ("dew", "feels", "windchill", "wind chill", "heat index", "apparent", "rosee")
 CHART = _SUM.get("temperature_chart", True)
-CHART_METRICS = _SUM.get("chart_metrics", ["temperature", "pressure", "humidity"])  # grandeurs dessinées (et retirées du texte)
+CHART_METRICS = _SUM.get("chart_metrics", ["temperature", "pressure", "humidity", "wind"])  # grandeurs dessinées (et retirées du texte)
 CHART_BAND = _SUM.get("chart_band_metrics", ["temperature"])  # grandeurs dessinées en zone min-max du jour sur les longues périodes
 STATS_MIN_DAYS = 9  # au-delà, l'historique détaillé de HA (10 jours) ne suffit plus : statistiques à long terme
 CHART_REF = {"pressure": 1013}  # repère tracé sur le graphique de pression (hPa)
 # Style des courbes dont le libellé contient le texte : gras et/ou pointillés
 CHART_STYLES = [{"match": norm(x["match"]), "bold": x.get("bold", False), "dashed": x.get("dashed", False)}
                 for x in _SUM.get("chart_styles", [{"match": "outdoor", "bold": True}, {"match": "grenier", "dashed": True}])]
-CHART_TITLES = {"temperature": ("🌡", "Températures", "°C"), "pressure": ("🧭", "Pression", "hPa"), "humidity": ("💧", "Humidité", "%")}
+CHART_TITLES = {"temperature": ("🌡", "Températures", "°C"), "pressure": ("🧭", "Pression", "hPa"), "humidity": ("💧", "Humidité", "%"),
+                "wind": ("💨", "Vent", "km/h")}
+WIND_UNITS = ("km/h", "m/s", "mph", "kn", "kt")
+WIND_COLORS = {"speed": (38, 139, 210), "gust": (245, 135, 0), "maxgust": (45, 45, 45), "direction": (140, 70, 190)}
+WIND_NAMES = {"speed": ("🔵", "Vent moyen"), "gust": ("🟠", "Rafale"), "maxgust": ("⚫", "Rafale max du jour — pointillés"),
+              "direction": ("🟣", "Direction — axe de droite, 0° = nord")}
+
+
+def wind_role(name, unit):
+    """« speed », « gust », « maxgust » ou « direction » pour les capteurs de vent d'un graphique, sinon None."""
+    low = norm(name)
+    if "wind" not in low and "gust" not in low:
+        return None
+    if unit == "°" and "direction" in low:
+        return "direction"
+    if unit in WIND_UNITS:
+        if "gust" in low:
+            return "maxgust" if ("max" in low or "daily" in low) else "gust"
+        if "wind" in low and "max" not in low:
+            return "speed"
+    return None
 
 
 def is_temperature(name, unit):
@@ -784,6 +807,8 @@ def is_temperature(name, unit):
 def chart_metric(name, unit):
     """« temperature », « pressure » ou « humidity » si le capteur va dans un graphique, sinon None."""
     low = norm(name)
+    if wind_role(name, unit):
+        return "wind"
     if unit in ("°C", "°F") and ("dewpoint" in low or "dew point" in low):
         return "dew"  # point de rosée : pas de courbe, sa plage est dans la légende du capteur qui l'expose
     if is_temperature(name, unit):
@@ -795,8 +820,10 @@ def chart_metric(name, unit):
     return None
 
 
-def chart_label(name, metric):
+def chart_label(name, metric, unit=""):
     """Nom du capteur sans le mot de la grandeur (« Weather Station Indoor Temperature » -> « Weather Station Indoor »)."""
+    if metric == "wind":
+        return wind_role(name, unit) or name
     word = {"temperature": ("temperature", "température"), "pressure": ("pressure",), "humidity": ("humidity",),
             "dew": ("dewpoint", "dew point")}[metric]
     base = name.strip()
@@ -848,9 +875,9 @@ def attach_chart(text, chart_data, start=None, end=None):
     import chart  # import tardif : le dessin n'est utile qu'ici
     now = end or datetime.now()
     start = start or now - timedelta(hours=HOURS)
-    labels = {d[0] for m, data in chart_data.items() if m != "dew" for d in data}
+    labels = {d[0] for m, data in chart_data.items() if m not in ("dew", "wind") for d in data}
     keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2], d[4] if len(d) > 4 else None) for d in data]
-             for m, data in chart_data.items() if m != "dew"}
+             for m, data in chart_data.items() if m not in ("dew", "wind")}
     notes = {}  # capteur -> plage du point de rosée qu'il expose
     for entry in chart_data.get("dew", []):
         label, pts, _, dev = entry[:4]
@@ -876,12 +903,28 @@ def attach_chart(text, chart_data, start=None, end=None):
             styles[src] = style
             series.append((color[src][1], pts, style.get("bold", False), style.get("dashed", False), band if metric in CHART_BAND else None))
         panels.append({"unit": unit, "series": series, "ref": CHART_REF.get(metric), "clamp": (0, 100) if metric == "humidity" else None})
+    wind = {}
+    for role, pts, wunit, *_ in chart_data.get("wind", []):
+        if role in WIND_COLORS and role not in wind and any(v is not None for _, v in pts):
+            wind[role] = (pts, wunit)
+    wind_legend = []
+    if wind:
+        speed_unit = next((u for r in ("speed", "gust", "maxgust") if r in wind for u in [wind[r][1]] if u), "km/h")
+        series = [(WIND_COLORS[r], wind[r][0], False, r == "maxgust") for r in ("speed", "gust", "maxgust") if r in wind]
+        panel = {"unit": speed_unit, "series": series, "ref": None, "clamp": None, "floor": 0}
+        if "direction" in wind:
+            panel["right"] = {"unit": "°", "color": WIND_COLORS["direction"], "range": (0, 360), "points": wind["direction"][0]}
+        panels.append(panel)
+        wind_legend = [f"{WIND_NAMES[r][0]} {WIND_NAMES[r][1]}" for r in ("speed", "gust", "maxgust", "direction") if r in wind]
+        for r in wind:
+            vals = [v for _, v in wind[r][0] if v is not None]
+            fallback.append(f"• vent ({r}) : {min(vals):g} → {max(vals):g}, actuel {vals[-1]:g}")
     def hint(src):
         st = styles.get(src, {})
         return " — trait épais" if st.get("bold") else " — pointillés" if st.get("dashed") else ""
     legend = [f"{color[src][0]} {src}{hint(src)}" + (f" (rosée {notes[src]})" if src in notes else "") for src in sources if src in color]
     legend += [f"• {src}" for src in sources if src not in color]  # sans couleur : plus de 8 capteurs
-    caption = "\n".join(legend)[:1000]
+    caption = "\n".join(legend + wind_legend)[:1000]
     try:
         return text, chart.render(panels, start, now), caption
     except Exception as e:
@@ -899,9 +942,9 @@ PERIODS = {  # mot -> (libellé, début) ; « to date » : depuis le début de l
 PERIOD_WORDS = {"jour": "d", "day": "d", "semaine": "w", "week": "w", "mois": "m", "month": "m", "an": "y", "annee": "y", "year": "y",
                 "wtd": "wtd", "mtd": "mtd", "ytd": "ytd", "1d": "d", "7d": "w", "30d": "m", "365d": "y"}
 METRIC_WORDS = {"temperature": "temperature", "temp": "temperature", "pression": "pressure", "pressure": "pressure",
-                "humidity": "humidity", "humidite": "humidity"}
+                "humidity": "humidity", "humidite": "humidity", "vent": "wind", "wind": "wind"}
 GRAPH_USAGE = ("📈 /graph <période> [grandeur]\n• période : d (24 h, comme dans le résumé), w (7 j), m (30 j), y (12 mois), wtd / mtd / ytd (depuis lundi / le début du mois / de "
-               "l'année)\n• grandeur : temperature, pression ou humidity (une seule ; sans mot, les trois)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature")
+               "l'année)\n• grandeur : temperature, pression, humidity ou vent (une seule ; sans mot, toutes)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature · /graph w vent")
 
 
 def stats_points(rows, max_gap=timedelta(days=1.6)):
@@ -935,7 +978,7 @@ def graph_report(args, debug=False):
             metrics.append(METRIC_WORDS[w])
         else:
             return f"Mot inconnu : « {a} ».\n\n{GRAPH_USAGE}"
-    metrics = metrics or ["temperature", "pressure", "humidity"]
+    metrics = metrics or ["temperature", "pressure", "humidity", "wind"]
     label, begin = PERIODS[period]
     now = datetime.now()
     start = min(begin(now), now - timedelta(hours=2))  # une période « to date » à peine commencée reste lisible
@@ -973,7 +1016,12 @@ def graph_report(args, debug=False):
                     real = [b for b in band if b[1] is not None]
                     report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(real)} jours de statistiques, de {real[0][0]:%d/%m} à "
                                   f"{real[-1][0]:%d/%m}, min {min(lo for _, lo, _ in real):g}, max {max(hi for _, _, hi in real):g}" + (", avec des trous" if len(real) < len(band) else ""))
-                data[metric].append((chart_label(name, metric), mean, "", dev, band))
+                if metric == "wind":  # rafales : maximum du jour ; vitesse et direction : moyenne
+                    role = wind_role(name, unit)
+                    pts = [(t, hi) for t, _, hi in band] if role in ("gust", "maxgust") else mean
+                    data[metric].append((role, pts, unit, dev))
+                else:
+                    data[metric].append((chart_label(name, metric), mean, "", dev, band))
                 continue
         series = history([eid], start.astimezone(), None).get(eid, [])
         if series:
@@ -986,7 +1034,7 @@ def graph_report(args, debug=False):
             report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(series)} relevés"
                           + (f", de {ts(series[0]):%d/%m %Hh%M} à {ts(series[-1]):%d/%m %Hh%M}, min {min(raw):g}, max {max(raw):g}" if raw else ", aucun relevé numérique"))
         if pts:
-            data[metric].append((chart_label(name, metric), pts, "", dev))
+            data[metric].append((chart_label(name, metric, unit), pts, unit if metric == "wind" else "", dev))
     if debug:
         return "\n".join(report)
     if not any(data[m] for m in metrics):
@@ -1074,8 +1122,9 @@ def build_report(with_chart=True):
                 pts = temperature_points(s2)
                 if pts:
                     note = annotations.get(eid)
-                    label = chart_label(name, metric)
-                    chart_data[metric].append((label, pts, note[2] if note and note[2] else "", (dmap.get(eid) or {}).get("n") or label))
+                    label = chart_label(name, metric, unit)
+                    extra = unit if metric == "wind" else note[2] if note and note[2] else ""
+                    chart_data[metric].append((label, pts, extra, (dmap.get(eid) or {}).get("n") or label))
                 continue
         if eid in annexes:
             continue
@@ -1139,6 +1188,9 @@ def build_report(with_chart=True):
                 key = "📈 Capteurs"
             elif dom == "binary_sensor":
                 line = alert_line(label, series)
+                rule = next((m for m in MIN_ALERTS if m["match"] in norm(name)), None)
+                if line and rule and len(on_events(series)) < rule["min"]:
+                    line = None
                 key = "🚨 Alertes"
             elif eid in armed or dom == "camera":
                 line = armed_line(label, series, cur.get(eid))

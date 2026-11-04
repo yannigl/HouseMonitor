@@ -107,7 +107,7 @@ la légende du message est une seule liste de pastilles et de noms, avec, pour c
 intérieures, pressions absolue et relative) sont deux capteurs, donc deux couleurs.
 - Styles : `"chart_styles": [{"match": "outdoor", "bold": true}, {"match": "grenier", "dashed": true}]` (défaut) : **trait épais = extérieur (« outdoor »), pointillés = grenier**,
   rappelé dans la légende (`🟠 Weather Station Outdoor — trait épais`, `🔵 Thermomètre Grenier2 — pointillés`). Aucun autre capteur n'est en pointillés.
-- `"chart_metrics": ["temperature", "pressure", "humidity"]` (défaut) : grandeurs dessinées ; celles qui ne sont pas listées restent en lignes de texte.
+- `"chart_metrics": ["temperature", "pressure", "humidity", "wind"]` (défaut) : grandeurs dessinées (« wind » : vitesse et rafale en deux courbes, rafale max du jour en pointillés, direction en points sur l'axe de droite, 0–360°) ; celles qui ne sont pas listées restent en lignes de texte.
   `"temperature_chart": false` supprime les graphiques.
 - L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib) et envoyée par `/update` au chat d'où la commande est partie. Si le dessin échoue, les valeurs
   passent dans le texte. `python3 summary.py --dry` écrit l'image dans `temperatures.png`.
@@ -116,7 +116,7 @@ intérieures, pressions absolue et relative) sont deux capteurs, donc deux coule
 `/graph` seul rappelle la syntaxe ; `/graph d` renvoie le graphique du résumé du matin (24 h) (température, pression, humidité, une pastille par capteur), sur la période et la grandeur demandées. Autorisé aux membres du groupe.
 - **Période** (`d` = 24 h, comme dans le résumé) : `d` (24 heures), `w` (7 jours), `m` (30 jours), `y` (12 mois) ; `wtd`, `mtd`, `ytd` : depuis lundi, depuis le début du mois, depuis le 1er janvier
   (« to date »). Aussi : jour, semaine, mois, an.
-- **Grandeur** (les trois par défaut) : `temperature`, `pression` ou `humidity` (une seule). Exemples : `/graph d`, `/graph w`, `/graph mtd pression`, `/graph d temperature`, `/graph ytd humidity` (un mot de grandeur sans période = 24 h).
+- **Grandeur** (toutes par défaut) : `temperature`, `pression`, `humidity` ou `vent` (une seule). Exemples : `/graph d`, `/graph w`, `/graph mtd pression`, `/graph d temperature`, `/graph ytd humidity` (un mot de grandeur sans période = 24 h).
 - L'axe du temps s'adapte : heures (jusqu'à 36 h), jours (`JJ/MM`), puis mois (`MM/AA`). Au-delà de 36 h, les relevés sont moyennés par paquets (700 points au plus par courbe).
 - **Au-delà de 9 jours (`m`, `y`, `ytd`, et `mtd` tard dans le mois)** : HA ne garde l'historique détaillé que 10 jours par défaut (`recorder: purge_keep_days`), mais ses **statistiques à long terme**
   (moyenne, minimum, maximum par jour) ne sont pas supprimées. `/graph` les lit par l'API WebSocket de HA (`hastats.py`, bibliothèque standard, avec le même jeton que le reste). La courbe est la
@@ -174,6 +174,8 @@ Un appareil qui n'émet que sur événement (porte, mouvement, bouton) n'est jam
   "annotate": [{"entity": "monthly rain", "with": "daily rain", "label": "daily", "mode": "yesterday"}]}`.
 - **Températures en °F** : le résumé les convertit en °C (HA laisse certains capteurs dans leur unité d'origine). `/update all` garde
   la valeur brute de HA.
+- **Alertes peu nombreuses** : `"min_alerts": [{"match": "connectivity", "min": 3}]` (défaut) : une ligne d'alertes dont le nom contient « connectivity » n'apparaît
+  qu'à partir de 3 alertes sur la fenêtre. « Windchill » est masqué par défaut (`hide`).
 - **Lignes masquées** : `"summary": {"hide": ["texte"]}` (vide par défaut) retire du résumé du matin tout capteur dont le nom
   contient ce texte. `/update all` montre toujours tout.
 - Batteries : une batterie dont le nom contient « batter » est masquée au-dessus du seuil, même sans unité.

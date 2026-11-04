@@ -11,6 +11,7 @@ from datetime import timedelta
 
 W = 1000
 LEFT, RIGHT, TOP, BOTTOM = 64, 18, 18, 44
+RIGHT_WIDE = 62  # marge droite quand un graphique a un second axe (direction du vent)
 # (pastille Telegram, couleur RVB) : les 8 premiers capteurs ont une courbe
 PALETTE = [("🔴", (220, 50, 47)), ("🔵", (38, 139, 210)), ("🟢", (46, 160, 67)), ("🟠", (245, 135, 0)),
            ("🟣", (140, 70, 190)), ("🟤", (140, 90, 50)), ("🟡", (215, 185, 0)), ("⚫", (45, 45, 45))]
@@ -24,6 +25,8 @@ GLYPHS = {
     "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"], "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
     ":": ["00000", "00100", "00100", "00000", "00100", "00100", "00000"], ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
     "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+    "k": ["10000", "10010", "10100", "11000", "10100", "10010", "10001"], "m": ["00000", "00000", "11010", "10101", "10101", "10101", "10101"],
+    "s": ["00000", "00000", "01111", "10000", "01110", "00001", "11110"],
     "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
     "%": ["11001", "11010", "00010", "00100", "01000", "01011", "10011"], "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
     "h": ["10000", "10000", "10110", "11001", "10001", "10001", "10001"], "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
@@ -171,28 +174,51 @@ PANEL_H, PANEL_GAP = 290, 24
 WIDTH_NORMAL, WIDTH_BOLD, DASH = 2.2, 4.8, (11, 7)
 
 
+def draw_right_axis(c, panel, px, y0, y1, x1):
+    """Second axe (à droite) : graduations et points d'une série, ex. la direction du vent de 0 à 360°."""
+    r = panel["right"]
+    lo, hi = r["range"]
+    py = lambda v: y1 - (v - lo) / (hi - lo) * (y1 - y0)
+    for v in range(int(lo), int(hi) + 1, 90):
+        y = int(py(v))
+        c.rect(x1, y, x1 + 4, y, r["color"])
+        c.text(x1 + 8, y - 7, f"{v}", color=r["color"])
+    c.text(x1 + 8, y0 - 18, r["unit"], color=r["color"], scale=2)
+    for t, v in r["points"]:
+        if v is not None:
+            x, y = int(px(t)), int(py(v))
+            c.rect(x - 1, y - 1, x + 1, y + 1, r["color"])
+
+
 def render(panels, start, end):
     """Plusieurs graphiques les uns sous les autres, sur le même axe de temps.
     `panels` : [{"unit": "°C", "series": [(couleur RVB, [(datetime, valeur), ...], gras, pointillés)], "ref": repère ou None, "clamp": (min, max) ou None}].
     -> octets PNG."""
-    panels = [p for p in panels if p["series"]]
-    height = len(panels) * (PANEL_H + PANEL_GAP) + BOTTOM
+    panels = [p for p in panels if p["series"] or p.get("right")]
+    ph = PANEL_H if len(panels) <= 3 else 250  # quatre graphiques : un peu moins hauts
+    height = len(panels) * (ph + PANEL_GAP) + BOTTOM
     c = Canvas(W, height)
-    x0, x1 = LEFT, W - RIGHT
+    x0, x1 = LEFT, W - (RIGHT_WIDE if any(p.get("right") for p in panels) else RIGHT)
     total = (end - start).total_seconds()
     px = lambda t: x0 + (t - start).total_seconds() / total * (x1 - x0)
     grid, axis = (225, 225, 225), (120, 120, 120)
     ticks = time_ticks(start, end)
     for n, panel in enumerate(panels):
-        y0 = n * (PANEL_H + PANEL_GAP) + PANEL_GAP
-        y1 = y0 + PANEL_H - 6
+        y0 = n * (ph + PANEL_GAP) + PANEL_GAP
+        y1 = y0 + ph - 6
         vals = [v for entry in panel["series"] for _, v in entry[1] if v is not None]
         vals += [v for entry in panel["series"] if len(entry) > 4 and entry[4] for _, lo, hi in entry[4] if lo is not None for v in (lo, hi)]
         if panel.get("ref") is not None:
             vals.append(panel["ref"])
+        if panel.get("floor") is not None:
+            vals.append(panel["floor"])
+        if not vals:
+            vals = [0.0, 1.0]
         lo, hi = min(vals), max(vals)
         step = nice_step(max(hi - lo, 2.0), 5)
         ymin, ymax = math.floor((lo - 0.3) / step) * step, math.ceil((hi + 0.3) / step) * step
+        if panel.get("floor") is not None:
+            ymin = max(ymin, panel["floor"])
         if panel.get("clamp"):
             ymin, ymax = max(ymin, panel["clamp"][0]), min(ymax, panel["clamp"][1])
         py = lambda v: y1 - (v - ymin) / (ymax - ymin) * (y1 - y0)
@@ -223,4 +249,6 @@ def render(panels, start, end):
             for run in runs(points, lambda v: v is None):  # idem pour la courbe
                 c.polyline([(px(t), py(max(ymin, min(ymax, v)))) for t, v in run], color, WIDTH_BOLD if bold else WIDTH_NORMAL,
                            (DASH if dashed is True else dashed) or None)
+        if panel.get("right"):
+            draw_right_axis(c, panel, px, y0, y1, x1)
     return c.png()
