@@ -613,3 +613,7 @@ Sans le compteur, la ligne « Pi au total » indique « non mesuré » ; le rest
   relancez `sudo ./setup-netcount.sh` (cela remet les compteurs du noyau à 0, sans effet sur le cumul).
 - Désinstaller : `sudo systemctl disable --now housemonitor-netcount && sudo rm /etc/systemd/system/housemonitor-netcount.service /etc/sudoers.d/housemonitor-netcount /usr/local/sbin/housemonitor-netcount && sudo nft delete table inet housemonitor`
 - Le `git pull` du matin est mesuré avec ce compteur quand il est installé (plus de trafic local mélangé).
+
+## Exporter l'historique brut d'un capteur (CSV)
+`python3 exportdata.py [heures] [mot ...]` écrit `export_<heures>h.csv` (tous les relevés de HA : heure, entité, nom, valeur, unité) pour les capteurs dont le nom contient un des mots
+(défaut : `download upload`, sur 24 h) et affiche le rythme des relevés (intervalle médian, min, max). Ex. `python3 exportdata.py 48 wind`.
