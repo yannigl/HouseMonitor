@@ -384,7 +384,7 @@ def handle(text, st, role="admin", chat_id=None):
             log_net("listener")  # les octets en cours restent dans l'ancien cycle
             reset_cycle()
             return f"✅ Compteur remis à zéro\nAvant : {before}\n\n{data_block()}"
-        return data_block()
+        return "\n".join(x for x in (data_block(), "", summary.router_volume_text()) if x is not None).rstrip()
     try:
         if cmd in ("/on", "/off"):
             return control.act(cmd == "/on", " ".join(parts[1:]) or None)

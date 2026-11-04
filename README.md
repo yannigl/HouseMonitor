@@ -116,7 +116,7 @@ intérieures, pressions absolue et relative) sont deux capteurs, donc deux coule
 `/graph` seul rappelle la syntaxe ; `/graph d` renvoie le graphique du résumé du matin (24 h) (température, pression, humidité, une pastille par capteur), sur la période et la grandeur demandées. Autorisé aux membres du groupe.
 - **Période** (`d` = 24 h, comme dans le résumé) : `d` (24 heures), `w` (7 jours), `m` (30 jours), `y` (12 mois) ; `wtd`, `mtd`, `ytd` : depuis lundi, depuis le début du mois, depuis le 1er janvier
   (« to date »). Aussi : jour, semaine, mois, an.
-- **Grandeur** (toutes par défaut) : `temperature`, `pression`, `humidity` ou `vent` (une seule). Exemples : `/graph d`, `/graph w`, `/graph mtd pression`, `/graph d temperature`, `/graph ytd humidity` (un mot de grandeur sans période = 24 h).
+- **Grandeur** (toutes par défaut) : `temperature`, `pression`, `humidity`, `vent` ou `data` (une seule ; `data` = débit download / upload du modem sur la période, total estimé dans la légende ; absent des graphiques par défaut). Exemples : `/graph d`, `/graph w`, `/graph mtd pression`, `/graph d temperature`, `/graph ytd humidity` (un mot de grandeur sans période = 24 h).
 - L'axe du temps s'adapte : heures (jusqu'à 36 h), jours (`JJ/MM`), puis mois (`MM/AA`). Au-delà de 36 h, les relevés sont moyennés par paquets (700 points au plus par courbe).
 - **Au-delà de 9 jours (`m`, `y`, `ytd`, et `mtd` tard dans le mois)** : HA ne garde l'historique détaillé que 10 jours par défaut (`recorder: purge_keep_days`), mais ses **statistiques à long terme**
   (moyenne, minimum, maximum par jour) ne sont pas supprimées. `/graph` les lit par l'API WebSocket de HA (`hastats.py`, bibliothèque standard, avec le même jeton que le reste). La courbe est la
@@ -617,3 +617,9 @@ Sans le compteur, la ligne « Pi au total » indique « non mesuré » ; le rest
 ## Exporter l'historique brut d'un capteur (CSV)
 `python3 exportdata.py [heures] [mot ...]` écrit `export_<heures>h.csv` (tous les relevés de HA : heure, entité, nom, valeur, unité) pour les capteurs dont le nom contient un des mots
 (défaut : `download upload`, sur 24 h) et affiche le rythme des relevés (intervalle médian, min, max). Ex. `python3 exportdata.py 48 wind`.
+
+## Volume du routeur 4G (estimation)
+Les capteurs download / upload de l'intégration routeur donnent, toutes les 30 s, le débit moyen des 30 s écoulées (Wi-Fi compris : vérifié avec une caméra Wi-Fi).
+Le résumé du matin affiche « Downloaded / Uploaded data : ≈ … » (intégrale des débits sur 24 h, un relevé valant au plus 2 min) et le pic ; `"traffic_volume": false`
+(dans `summary`) ne garde que les pics. `/data` ajoute la ligne « Routeur 4G, 24 dernières heures » et `/graph d data` trace les deux débits avec les totaux dans la légende.
+C'est une estimation : l'opérateur annonce davantage (≈ 40 à 60 % comptés les jours calmes) ; l'écart des jours d'appels vidéo est à vérifier. `volume.py jj/mm [Mo opérateur]` compare un jour donné.

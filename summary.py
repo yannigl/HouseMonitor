@@ -56,10 +56,10 @@ ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.ge
             for a in _SUM.get("annotate", [
                 {"entity": "indoor temperature", "with": "indoor dewpoint", "label": "dew point", "mode": "range"},
                 {"entity": "monthly rain", "with": "daily rain", "label": "daily", "mode": "yesterday"}])]
-# Volume échangé calculé en intégrant les débits relevés par HA : désactivé par défaut. Les relevés sont ponctuels (un débit instantané
-# toutes les quelques dizaines de secondes) : les rafales entre deux relevés échappent au calcul, qui sous-estime beaucoup (2,4 Mo
-# annoncés pour un trafic de plus de 200 Mo). Un vrai compteur du routeur serait nécessaire.
-TRAFFIC_VOLUME = CFG.get("summary", {}).get("traffic_volume", False)
+# Volume échangé calculé en intégrant les débits relevés par HA (un relevé toutes les 30 s, moyenne des 30 s écoulées, Wi-Fi compris : vérifié avec
+# une caméra Wi-Fi). Estimation : l'opérateur compte plus (en-têtes ; jours d'appels vidéo à vérifier). `"traffic_volume": false` ne garde que les pics.
+TRAFFIC_VOLUME = CFG.get("summary", {}).get("traffic_volume", True)
+HOLD_MAX = 120  # s : un débit relevé ne vaut pas plus longtemps (trou de données de HA)
 # Avertissement « sans nouvelles » : un appareil dont tous les capteurs de mesure (hors batterie) se taisent depuis plus de STALE_HOURS.
 # `stale_ignore` : textes dans le nom de l'appareil à ne jamais signaler. Mettre `stale_hours` à 0 désactive l'avertissement.
 STALE_HOURS = CFG.get("summary", {}).get("stale_hours", 6)
@@ -403,6 +403,50 @@ def numeric_line(name, unit, states):
             f"actuel {pts[-1][1]:g}{unit}")
 
 
+def rate_role(name, unit):
+    """« download » ou « upload » pour un capteur de débit du routeur, sinon None."""
+    low = norm(name)
+    if unit in RATE_BYTES:
+        return "download" if "download" in low else "upload" if "upload" in low else None
+    return None
+
+
+def rate_total(states, start, end, factor):
+    """Octets écoulés entre `start` et `end` (datetimes avec fuseau) : chaque débit relevé vaut jusqu'au relevé suivant (HOLD_MAX au plus)."""
+    pts = []
+    for st in states:
+        try:
+            pts.append((ts(st), float(st["state"])))
+        except (ValueError, KeyError, TypeError):
+            pts.append((ts(st), None))
+    total = 0.0
+    for i, (t, v) in enumerate(pts):
+        nxt = pts[i + 1][0] if i + 1 < len(pts) else end
+        t0, t1 = max(t, start), min(nxt, end, t + timedelta(seconds=HOLD_MAX))
+        if v is not None and t1 > t0:
+            total += v * factor * (t1 - t0).total_seconds()
+    return total
+
+
+def router_volume_text(hours=24):
+    """Ligne « Routeur 4G » pour /data : volumes download et upload estimés sur `hours` d'après les débits de HA ('' si indisponible)."""
+    try:
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(hours=hours)
+        ents = {eid: (n, u) for eid, (n, u) in discover(states()).items() if eid.startswith("sensor.") and rate_role(n, u)}
+        if not ents:
+            return ""
+        hist = history(list(ents), start, now)
+        parts = {}
+        for eid, (n, u) in ents.items():
+            parts[rate_role(n, u)] = parts.get(rate_role(n, u), 0) + rate_total(hist.get(eid, []), start, now, RATE_BYTES[u])
+        return (f"📶 Routeur 4G, {hours} dernières heures (estimation d'après les débits de HA) : ↓ {fmt_bytes(parts.get('download', 0))} · "
+                f"↑ {fmt_bytes(parts.get('upload', 0))}")
+    except Exception as e:
+        print(f"volume du routeur illisible : {type(e).__name__}: {e}", file=sys.stderr)
+        return ""
+
+
 def traffic_line(name, unit, states, now=None):
     """Débit (KiB/s…) -> volume écoulé sur la fenêtre (intégrale du débit, approximative) et pic avec son heure."""
     now = now or datetime.now().astimezone()
@@ -419,7 +463,7 @@ def traffic_line(name, unit, states, now=None):
     for i, (t, v) in enumerate(pts):
         end = pts[i + 1][0] if i + 1 < len(pts) else now
         if v is not None and end > t:
-            total += v * (end - t).total_seconds()  # le dernier relevé vaut jusqu'au suivant
+            total += v * min((end - t).total_seconds(), HOLD_MAX)  # le dernier relevé vaut jusqu'au suivant, sans dépasser HOLD_MAX
     peak_t, peak = max(((t, v) for t, v in pts if v is not None), key=lambda p: p[1])
     low = norm(name)
     sens = "download" if "download" in low else "upload" if "upload" in low else None
@@ -778,6 +822,8 @@ CHART_STYLES = [{"match": norm(x["match"]), "bold": x.get("bold", False), "dashe
                 for x in _SUM.get("chart_styles", [{"match": "outdoor", "bold": True}, {"match": "grenier", "dashed": True}])]
 CHART_TITLES = {"temperature": ("🌡", "Températures", "°C"), "pressure": ("🧭", "Pression", "hPa"), "humidity": ("💧", "Humidité", "%"),
                 "wind": ("💨", "Vent", "km/h")}
+DATA_COLORS = {"download": (38, 139, 210), "upload": (245, 135, 0)}
+DATA_NAMES = {"download": "🔵 Download", "upload": "🟠 Upload"}
 WIND_UNITS = ("km/h", "m/s", "mph", "kn", "kt")
 WIND_COLORS = {"speed": (38, 139, 210), "gust": (245, 135, 0), "maxgust": (45, 45, 45), "direction": (140, 70, 190)}
 WIND_NAMES = {"speed": ("🔵", "Vent moyen"), "gust": ("🟠", "Rafales — points"), "maxgust": ("⚫", "Rafale max du jour — pointillés"),
@@ -807,6 +853,8 @@ def is_temperature(name, unit):
 def chart_metric(name, unit):
     """« temperature », « pressure » ou « humidity » si le capteur va dans un graphique, sinon None."""
     low = norm(name)
+    if rate_role(name, unit):
+        return "data"
     if wind_role(name, unit):
         return "wind"
     if unit in ("°C", "°F") and ("dewpoint" in low or "dew point" in low):
@@ -824,6 +872,8 @@ def chart_label(name, metric, unit=""):
     """Nom du capteur sans le mot de la grandeur (« Weather Station Indoor Temperature » -> « Weather Station Indoor »)."""
     if metric == "wind":
         return wind_role(name, unit) or name
+    if metric == "data":
+        return rate_role(name, unit) or name
     word = {"temperature": ("temperature", "température"), "pressure": ("pressure",), "humidity": ("humidity",),
             "dew": ("dewpoint", "dew point")}[metric]
     base = name.strip()
@@ -875,9 +925,9 @@ def attach_chart(text, chart_data, start=None, end=None):
     import chart  # import tardif : le dessin n'est utile qu'ici
     now = end or datetime.now()
     start = start or now - timedelta(hours=HOURS)
-    labels = {d[0] for m, data in chart_data.items() if m not in ("dew", "wind") for d in data}
+    labels = {d[0] for m, data in chart_data.items() if m not in ("dew", "wind", "data") for d in data}
     keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2], d[4] if len(d) > 4 else None) for d in data]
-             for m, data in chart_data.items() if m not in ("dew", "wind")}
+             for m, data in chart_data.items() if m not in ("dew", "wind", "data")}
     notes = {}  # capteur -> plage du point de rosée qu'il expose
     for entry in chart_data.get("dew", []):
         label, pts, _, dev = entry[:4]
@@ -924,7 +974,20 @@ def attach_chart(text, chart_data, start=None, end=None):
         return " — trait épais" if st.get("bold") else " — pointillés" if st.get("dashed") else ""
     legend = [f"{color[src][0]} {src}{hint(src)}" + (f" (rosée {notes[src]})" if src in notes else "") for src in sources if src in color]
     legend += [f"• {src}" for src in sources if src not in color]  # sans couleur : plus de 8 capteurs
-    caption = "\n".join(legend + wind_legend)[:1000]
+    data_legend = []
+    flows = {}
+    for role, pts, dunit, total in chart_data.get("data", []):
+        if role in ("download", "upload") and role not in flows and any(v is not None for _, v in pts):
+            flows[role] = (pts, dunit, total)
+    if flows:
+        panels.append({"unit": next(iter(flows.values()))[1], "ref": None, "clamp": None, "floor": 0,
+                       "series": [(DATA_COLORS[r], flows[r][0], False, False) for r in ("download", "upload") if r in flows]})
+        for r in ("download", "upload"):
+            if r in flows:
+                vals = [v for _, v in flows[r][0] if v is not None]
+                data_legend.append(f"{DATA_NAMES[r]} — total ≈ {fmt_bytes(flows[r][2])}, pic {max(vals):g} {flows[r][1]}")
+                fallback.append(f"• {r} : {min(vals):g} → {max(vals):g} {flows[r][1]}, total ≈ {fmt_bytes(flows[r][2])}")
+    caption = "\n".join(legend + wind_legend + data_legend)[:1000]
     try:
         return text, chart.render(panels, start, now), caption
     except Exception as e:
@@ -942,9 +1005,10 @@ PERIODS = {  # mot -> (libellé, début) ; « to date » : depuis le début de l
 PERIOD_WORDS = {"jour": "d", "day": "d", "semaine": "w", "week": "w", "mois": "m", "month": "m", "an": "y", "annee": "y", "year": "y",
                 "wtd": "wtd", "mtd": "mtd", "ytd": "ytd", "1d": "d", "7d": "w", "30d": "m", "365d": "y"}
 METRIC_WORDS = {"temperature": "temperature", "temp": "temperature", "pression": "pressure", "pressure": "pressure",
-                "humidity": "humidity", "humidite": "humidity", "vent": "wind", "wind": "wind"}
+                "humidity": "humidity", "humidite": "humidity", "vent": "wind", "wind": "wind",
+                "data": "data", "debit": "data", "reseau": "data", "modem": "data"}
 GRAPH_USAGE = ("📈 /graph <période> [grandeur]\n• période : d (24 h, comme dans le résumé), w (7 j), m (30 j), y (12 mois), wtd / mtd / ytd (depuis lundi / le début du mois / de "
-               "l'année)\n• grandeur : temperature, pression, humidity ou vent (une seule ; sans mot, toutes)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature · /graph w vent")
+               "l'année)\n• grandeur : temperature, pression, humidity, vent ou data (débit du modem, avec les totaux ; une seule ; sans mot, les quatre premières)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature · /graph w vent · /graph d data")
 
 
 def stats_points(rows, max_gap=timedelta(days=1.6)):
@@ -1016,7 +1080,10 @@ def graph_report(args, debug=False):
                     real = [b for b in band if b[1] is not None]
                     report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(real)} jours de statistiques, de {real[0][0]:%d/%m} à "
                                   f"{real[-1][0]:%d/%m}, min {min(lo for _, lo, _ in real):g}, max {max(hi for _, _, hi in real):g}" + (", avec des trous" if len(real) < len(band) else ""))
-                if metric == "wind":  # rafales : maximum du jour ; vitesse et direction : moyenne
+                if metric == "data":  # débit moyen par jour ; total ≈ moyenne × 86400 s
+                    total = sum(avg * 86400 * RATE_BYTES[unit] for _, avg, _, _ in stats[eid] if avg is not None)
+                    data[metric].append((rate_role(name, unit), mean, unit, total))
+                elif metric == "wind":  # rafales : maximum du jour ; vitesse et direction : moyenne
                     role = wind_role(name, unit)
                     pts = [(t, hi) for t, _, hi in band] if role in ("gust", "maxgust") else mean
                     data[metric].append((role, pts, unit, dev))
@@ -1034,7 +1101,10 @@ def graph_report(args, debug=False):
             report.append(f"• {eid} [{metric}] appareil={(dmap.get(eid) or {}).get('n')} : {len(series)} relevés"
                           + (f", de {ts(series[0]):%d/%m %Hh%M} à {ts(series[-1]):%d/%m %Hh%M}, min {min(raw):g}, max {max(raw):g}" if raw else ", aucun relevé numérique"))
         if pts:
-            data[metric].append((chart_label(name, metric, unit), pts, unit if metric == "wind" else "", dev))
+            if metric == "data":
+                data[metric].append((rate_role(name, unit), pts, unit, rate_total(series, start.astimezone(), now.astimezone(), RATE_BYTES[unit])))
+            else:
+                data[metric].append((chart_label(name, metric, unit), pts, unit if metric == "wind" else "", dev))
     if debug:
         return "\n".join(report)
     if not any(data[m] for m in metrics):
