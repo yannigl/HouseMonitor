@@ -17,10 +17,11 @@ MAX_HOLD = 60  # s : un relevé ne vaut pas plus longtemps que ça (trou de donn
 def parse_day(arg):
     if not arg:
         return (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m"):
+    if arg.count("/") == 1:
+        arg += f"/{datetime.now().year}"  # jj/mm : année en cours (strptime sans année est obsolète)
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
-            d = datetime.strptime(arg, fmt)
-            return d.replace(year=datetime.now().year) if fmt == "%d/%m" else d
+            return datetime.strptime(arg, fmt)
         except ValueError:
             pass
     sys.exit(f"Date illisible : {arg} (jj/mm ou aaaa-mm-jj)")
