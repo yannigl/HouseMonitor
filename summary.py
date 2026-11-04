@@ -1117,6 +1117,8 @@ def build_report(with_chart=True):
             continue
         if chart_data is not None and eid.startswith("sensor."):  # température, pression, humidité : dans les graphiques, pas dans le texte
             metric = chart_metric(name, unit)
+            if metric == "wind" and wind_role(name, unit) == "maxgust":
+                metric = None  # rafale max du jour : reste en ligne de texte dans le résumé (dessinée seulement par /graph)
             if metric in chart_data:
                 s2, u2 = to_celsius(hist.get(eid, []), unit)
                 pts = temperature_points(s2)
