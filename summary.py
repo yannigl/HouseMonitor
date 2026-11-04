@@ -780,7 +780,7 @@ CHART_TITLES = {"temperature": ("🌡", "Températures", "°C"), "pressure": ("�
                 "wind": ("💨", "Vent", "km/h")}
 WIND_UNITS = ("km/h", "m/s", "mph", "kn", "kt")
 WIND_COLORS = {"speed": (38, 139, 210), "gust": (245, 135, 0), "maxgust": (45, 45, 45), "direction": (140, 70, 190)}
-WIND_NAMES = {"speed": ("🔵", "Vent moyen"), "gust": ("🟠", "Rafale"), "maxgust": ("⚫", "Rafale max du jour — pointillés"),
+WIND_NAMES = {"speed": ("🔵", "Vent moyen"), "gust": ("🟠", "Rafales — points"), "maxgust": ("⚫", "Rafale max du jour — pointillés"),
               "direction": ("🟣", "Direction — axe de droite, 0° = nord")}
 
 
@@ -910,7 +910,7 @@ def attach_chart(text, chart_data, start=None, end=None):
     wind_legend = []
     if wind:
         speed_unit = next((u for r in ("speed", "gust", "maxgust") if r in wind for u in [wind[r][1]] if u), "km/h")
-        series = [(WIND_COLORS[r], wind[r][0], False, r == "maxgust") for r in ("speed", "gust", "maxgust") if r in wind]
+        series = [(WIND_COLORS[r], wind[r][0], False, r == "maxgust", None, r == "gust") for r in ("speed", "gust", "maxgust") if r in wind]
         panel = {"unit": speed_unit, "series": series, "ref": None, "clamp": None, "floor": 0}
         if "direction" in wind:
             panel["right"] = {"unit": "°", "color": WIND_COLORS["direction"], "range": (0, 360), "points": wind["direction"][0]}

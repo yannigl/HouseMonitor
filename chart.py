@@ -246,6 +246,12 @@ def render(panels, start, end):
             if len(entry) > 4 and entry[4]:  # plage minimum-maximum du jour : zone translucide, les chevauchements restent visibles
                 for run in runs([(t, (lo, hi)) for t, lo, hi in entry[4]], lambda v: v[0] is None):  # un trou de données coupe la zone
                     c.band([(px(t), py(max(ymin, min(ymax, hi))), py(max(ymin, min(ymax, lo)))) for t, (lo, hi) in run], color)
+            if len(entry) > 5 and entry[5]:  # nuage de points (rafales) : un petit carré par relevé, pas de courbe
+                for t, v in points:
+                    if v is not None:
+                        x, y = int(px(t)), int(py(max(ymin, min(ymax, v))))
+                        c.rect(x - 2, y - 2, x + 2, y + 2, color)
+                continue
             for run in runs(points, lambda v: v is None):  # idem pour la courbe
                 c.polyline([(px(t), py(max(ymin, min(ymax, v)))) for t, v in run], color, WIDTH_BOLD if bold else WIDTH_NORMAL,
                            (DASH if dashed is True else dashed) or None)

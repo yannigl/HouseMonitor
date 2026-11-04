@@ -107,7 +107,7 @@ la légende du message est une seule liste de pastilles et de noms, avec, pour c
 intérieures, pressions absolue et relative) sont deux capteurs, donc deux couleurs.
 - Styles : `"chart_styles": [{"match": "outdoor", "bold": true}, {"match": "grenier", "dashed": true}]` (défaut) : **trait épais = extérieur (« outdoor »), pointillés = grenier**,
   rappelé dans la légende (`🟠 Weather Station Outdoor — trait épais`, `🔵 Thermomètre Grenier2 — pointillés`). Aucun autre capteur n'est en pointillés.
-- `"chart_metrics": ["temperature", "pressure", "humidity", "wind"]` (défaut) : grandeurs dessinées (« wind » : vitesse et rafale en deux courbes, rafale max du jour en pointillés (seulement dans /graph ; le résumé la garde en texte), direction en points sur l'axe de droite, 0–360°) ; celles qui ne sont pas listées restent en lignes de texte.
+- `"chart_metrics": ["temperature", "pressure", "humidity", "wind"]` (défaut) : grandeurs dessinées (« wind » : vitesse en courbe, rafales en nuage de points, rafale max du jour en pointillés (seulement dans /graph ; le résumé la garde en texte), direction en points sur l'axe de droite, 0–360°) ; celles qui ne sont pas listées restent en lignes de texte.
   `"temperature_chart": false` supprime les graphiques.
 - L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib) et envoyée par `/update` au chat d'où la commande est partie. Si le dessin échoue, les valeurs
   passent dans le texte. `python3 summary.py --dry` écrit l'image dans `temperatures.png`.

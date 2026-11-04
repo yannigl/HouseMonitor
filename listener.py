@@ -125,7 +125,7 @@ COMMANDS = [
     ("restart", "Redémarrer le listener (relit config.json) · /restart modem : redémarrer le modem 4G"),
     ("alerts", "Alertes du jour : entités surveillées, état, armement, dernière erreur (administrateurs)"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
-    ("graph", "Graphique température / pression / humidité : /graph [d|w|m|y|wtd|mtd|ytd] [temperature|pression|humidity]"),
+    ("graph", "Graphique température / pression / humidité / vent : /graph [d|w|m|y|wtd|mtd|ytd] [temperature|pression|humidity|vent]"),
     ("play", "Joue la sonnerie Nokia sur le haut-parleur du Pi : /play [1 à 5 fois]"),
     ("heating", "Chauffage Netatmo : /heating on (normal) · /heating away (absent, plus bas)"),
     ("away", "Absent : tout armer + chauffage en position absent"),
