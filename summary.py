@@ -56,8 +56,8 @@ ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.ge
             for a in _SUM.get("annotate", [
                 {"entity": "indoor temperature", "with": "indoor dewpoint", "label": "dew point", "mode": "range"},
                 {"entity": "monthly rain", "with": "daily rain", "label": "daily", "mode": "yesterday"}])]
-# Volume échangé calculé en intégrant les débits relevés par HA (un relevé toutes les 30 s, moyenne des 30 s écoulées, Wi-Fi compris : vérifié avec
-# une caméra Wi-Fi). Estimation : l'opérateur compte plus (en-têtes ; jours d'appels vidéo à vérifier). `"traffic_volume": false` ne garde que les pics.
+# Volume échangé calculé en intégrant les débits relevés par HA (un relevé toutes les 30 s ; une caméra Wi-Fi y apparaît). Valeur MINIMALE : un appel vidéo
+# Teams de 30 min (Wi-Fi + routeur) n'y apparaît pas du tout, et l'opérateur compte davantage. `"traffic_volume": false` ne garde que les pics.
 TRAFFIC_VOLUME = CFG.get("summary", {}).get("traffic_volume", True)
 HOLD_MAX = 120  # s : un débit relevé ne vaut pas plus longtemps (trou de données de HA)
 # Avertissement « sans nouvelles » : un appareil dont tous les capteurs de mesure (hors batterie) se taisent depuis plus de STALE_HOURS.
@@ -440,7 +440,7 @@ def router_volume_text(hours=24):
         parts = {}
         for eid, (n, u) in ents.items():
             parts[rate_role(n, u)] = parts.get(rate_role(n, u), 0) + rate_total(hist.get(eid, []), start, now, RATE_BYTES[u])
-        return (f"📶 Routeur 4G, {hours} dernières heures (estimation d'après les débits de HA) : ↓ {fmt_bytes(parts.get('download', 0))} · "
+        return (f"📶 Routeur 4G, {hours} dernières heures (au moins, d'après les débits de HA : les appels vidéo n'y figurent pas) : ↓ {fmt_bytes(parts.get('download', 0))} · "
                 f"↑ {fmt_bytes(parts.get('upload', 0))}")
     except Exception as e:
         print(f"volume du routeur illisible : {type(e).__name__}: {e}", file=sys.stderr)
@@ -471,7 +471,7 @@ def traffic_line(name, unit, states, now=None):
     peak_word = {"download": "pic de download", "upload": "pic d'upload"}.get(sens, "pic")
     if not TRAFFIC_VOLUME:  # le volume calculé à partir de débits ponctuels est très inférieur au trafic réel : seulement le pic
         return f"{peak_word.capitalize()} : {peak:g} {unit} à {hm(peak_t)}"
-    return (f"{title} : ≈ {fmt_bytes(total * RATE_BYTES[unit])} sur {HOURS} h · {peak_word} {peak:g} {unit} à {hm(peak_t)}")
+    return (f"{title} : au moins {fmt_bytes(total * RATE_BYTES[unit])} sur {HOURS} h · {peak_word} {peak:g} {unit} à {hm(peak_t)}")
 
 
 def to_celsius(series, unit):
@@ -985,8 +985,8 @@ def attach_chart(text, chart_data, start=None, end=None):
         for r in ("download", "upload"):
             if r in flows:
                 vals = [v for _, v in flows[r][0] if v is not None]
-                data_legend.append(f"{DATA_NAMES[r]} — total ≈ {fmt_bytes(flows[r][2])}, pic {max(vals):g} {flows[r][1]}")
-                fallback.append(f"• {r} : {min(vals):g} → {max(vals):g} {flows[r][1]}, total ≈ {fmt_bytes(flows[r][2])}")
+                data_legend.append(f"{DATA_NAMES[r]} — total au moins {fmt_bytes(flows[r][2])}, pic {max(vals):g} {flows[r][1]}")
+                fallback.append(f"• {r} : {min(vals):g} → {max(vals):g} {flows[r][1]}, total au moins {fmt_bytes(flows[r][2])}")
     caption = "\n".join(legend + wind_legend + data_legend)[:1000]
     try:
         return text, chart.render(panels, start, now), caption

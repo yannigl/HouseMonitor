@@ -620,6 +620,6 @@ Sans le compteur, la ligne « Pi au total » indique « non mesuré » ; le rest
 
 ## Volume du routeur 4G (estimation)
 Les capteurs download / upload de l'intégration routeur donnent, toutes les 30 s, le débit moyen des 30 s écoulées (Wi-Fi compris : vérifié avec une caméra Wi-Fi).
-Le résumé du matin affiche « Downloaded / Uploaded data : ≈ … » (intégrale des débits sur 24 h, un relevé valant au plus 2 min) et le pic ; `"traffic_volume": false`
+Le résumé du matin affiche « Downloaded / Uploaded data : ≈ … » (« au moins » : intégrale des débits sur 24 h, un relevé valant au plus 2 min) et le pic ; `"traffic_volume": false`
 (dans `summary`) ne garde que les pics. `/data` ajoute la ligne « Routeur 4G, 24 dernières heures » et `/graph d data` trace les deux débits avec les totaux dans la légende.
-C'est une estimation : l'opérateur annonce davantage (≈ 40 à 60 % comptés les jours calmes) ; l'écart des jours d'appels vidéo est à vérifier. `volume.py jj/mm [Mo opérateur]` compare un jour donné.
+C'est un minimum : l'opérateur annonce davantage (≈ 40 à 60 % comptés les jours calmes) et un appel vidéo Teams de 30 min n'apparaît pas du tout dans ces capteurs (les jours d'appels, l'opérateur affiche des Go). `volume.py jj/mm [Mo opérateur]` compare un jour donné.
