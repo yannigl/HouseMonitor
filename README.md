@@ -633,5 +633,6 @@ Chaque lecture ouvre une session d'administration : l'interface web du routeur e
 Quand le compteur est disponible, les lignes Download / Upload du résumé ne donnent plus que les pics de débit. `python3 routersms.py --probe-counters` a servi à trouver ce compteur.
 
 ## Disponibilité d'un appareil (`availability.py`)
-`python3 availability.py [heures] [mot ...]` calcule, d'après l'historique de HA, le pourcentage de temps où chaque entité n'était pas « unavailable », le nombre de coupures et la plus longue
-(défaut : toutes les prises `switch.*` sur 24 h ; un mot filtre sur le nom, ex. `python3 availability.py 48 abri chambre2`). Utile pour juger une liaison Zigbee faible (HA garde le détail 10 jours).
+`python3 availability.py [heures] [mot ...]` calcule, d'après l'historique de HA, pour chaque **appareil** (nom affiché dans HA, ex. « Switch Abri ») le pourcentage de temps où il n'était pas « unavailable »,
+le nombre de coupures et la plus longue, les moins disponibles d'abord. Un mot filtre sur le nom de l'appareil ou de l'entité (ex. `python3 availability.py 48 abri chambre2`).
+Seul « unavailable » compte (« unknown » est normal pour certains capteurs). Utile pour juger une liaison Zigbee faible ; HA garde le détail 10 jours.
