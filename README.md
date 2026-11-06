@@ -631,3 +631,7 @@ Un thread du listener le lit toutes les 30 minutes (`"router_counter": {"every_m
 et garde les relevés dans `router_counter.csv` (sur le Pi, ignoré par git, 90 jours). `/data`, le résumé du matin et `/graph … data` affichent « Compteur du routeur 4G : aujourd'hui … · hier … · 24 h … ».
 Chaque lecture ouvre une session d'administration : l'interface web du routeur est déconnectée quelques secondes. Test : `python3 routercount.py` (une lecture, enregistrée).
 Quand le compteur est disponible, les lignes Download / Upload du résumé ne donnent plus que les pics de débit. `python3 routersms.py --probe-counters` a servi à trouver ce compteur.
+
+## Disponibilité d'un appareil (`availability.py`)
+`python3 availability.py [heures] [mot ...]` calcule, d'après l'historique de HA, le pourcentage de temps où chaque entité n'était pas « unavailable », le nombre de coupures et la plus longue
+(défaut : toutes les prises `switch.*` sur 24 h ; un mot filtre sur le nom, ex. `python3 availability.py 48 abri chambre2`). Utile pour juger une liaison Zigbee faible (HA garde le détail 10 jours).
