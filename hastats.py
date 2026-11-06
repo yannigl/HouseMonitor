@@ -134,3 +134,25 @@ def statistics(ha_url, token, entity_ids, start, end, period="day", units=None):
                 for eid, rows in msg["result"].items()}
     finally:
         ws.close()
+
+
+def command(ha_url, token, payload):
+    """Une commande WebSocket de HA (ex. {"type": "zha/devices"}) -> son résultat. Lève WSError si HA la refuse."""
+    ws = WebSocket(ha_url.replace("http", "ws", 1).rstrip("/") + "/api/websocket")
+    try:
+        first = ws.recv_json()
+        if first.get("type") != "auth_required":
+            raise WSError(f"réponse inattendue : {first.get('type')}")
+        ws.send_json({"type": "auth", "access_token": token})
+        if ws.recv_json().get("type") != "auth_ok":
+            raise WSError("jeton refusé par HA")
+        ws.send_json({"id": 1, **payload})
+        while True:
+            msg = ws.recv_json()
+            if msg.get("id") == 1:
+                break
+        if not msg.get("success"):
+            raise WSError(f"HA a refusé la demande : {msg.get('error', {}).get('message', msg)}")
+        return msg["result"]
+    finally:
+        ws.close()

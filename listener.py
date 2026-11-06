@@ -44,6 +44,7 @@ import modemwatch
 import routercount
 import summary
 import vacuum
+import zigbee
 from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, id_list, load_state, log_net,
                     pi_cum, reset_cycle, save_state)
 
@@ -126,6 +127,7 @@ COMMANDS = [
     ("restart", "Redémarrer le listener (relit config.json) · /restart modem : redémarrer le modem 4G"),
     ("alerts", "Alertes du jour : entités surveillées, état, armement, dernière erreur (administrateurs)"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
+    ("zigbee", "Santé du réseau Zigbee : liens (LQI, RSSI), coupures, voisins — /zigbee [heures] (administrateurs)"),
     ("graph", "Graphique température / pression / humidité / vent : /graph [d|w|m|y|wtd|mtd|ytd] [temperature|pression|humidity|vent]"),
     ("play", "Joue la sonnerie Nokia sur le haut-parleur du Pi : /play [1 à 5 fois]"),
     ("heating", "Chauffage Netatmo : /heating on (normal) · /heating away (absent, plus bas)"),
@@ -375,6 +377,13 @@ def handle(text, st, role="admin", chat_id=None):
         if parts[1] == "ping" and not st["ping"]:
             note = "\n⚠️ Healthchecks va alerter après la période de grâce."
         return f"✅ {parts[1]} → {'start' if st[parts[1]] else 'stop'}{note}\n\n" + status_text(st)
+    if cmd == "/zigbee" or (cmd == "/status" and args[:1] == ["zigbee"]):
+        rest = args[1:] if cmd == "/status" else args
+        try:
+            hours = float(next((x for x in rest if x.replace(".", "", 1).isdigit()), 24))
+            return zigbee.report(hours, debug="debug" in rest)
+        except Exception as e:
+            return f"❌ /zigbee impossible : {type(e).__name__}: {e}\n(ZHA est-il bien l'intégration Zigbee de HA ?)"
     if cmd == "/status":
         return status_text(st)
     if cmd == "/help":

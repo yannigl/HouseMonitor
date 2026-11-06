@@ -29,9 +29,9 @@ def downtime(series, start, end):
     return down, cuts, longest
 
 
-def main(argv):
-    hours = int(argv[0]) if argv and argv[0].isdigit() else 24
-    words = [summary.norm(a) for a in argv if not a.isdigit()]
+def compute(hours=24, words=()):
+    """{nom d'appareil: {"pct", "cuts", "longest" (s), "eid"}} d'après l'historique de HA ; `words` filtre sur le nom de l'appareil ou de l'entité."""
+    words = [summary.norm(w) for w in words]
     sts = summary.states()
     names = {s["entity_id"]: (s.get("attributes") or {}).get("friendly_name", s["entity_id"]) for s in sts}
     try:
@@ -52,22 +52,29 @@ def main(argv):
             if cand:
                 chosen[key] = (g["name"], sorted(cand)[0])
                 break
-    if not chosen:
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    hist = summary.history([e for _, e in chosen.values()], start, end) if chosen else {}
+    out = {}
+    for name, eid in chosen.values():
+        series = hist.get(eid, [])
+        if series:
+            down, cuts, longest = downtime(series, start, end)
+            out[name] = {"pct": 100 * (1 - down / (hours * 3600)), "cuts": cuts, "longest": longest, "eid": eid}
+    return out
+
+
+def main(argv):
+    hours = int(argv[0]) if argv and argv[0].isdigit() else 24
+    words = [a for a in argv if not a.isdigit()]
+    res = compute(hours, words)
+    if not res:
         sys.exit("Aucun appareil trouvé" + (f" pour : {', '.join(words)}" if words else "") + ".")
     end = datetime.now(timezone.utc)
     start = end - timedelta(hours=hours)
-    hist = summary.history([e for _, e in chosen.values()], start, end)
     print(f"Disponibilité sur {hours} h (du {start.astimezone():%d/%m %Hh%M} au {end.astimezone():%d/%m %Hh%M}) — seul « unavailable » compte comme coupure")
-    rows = []
-    for name, eid in chosen.values():
-        series = hist.get(eid, [])
-        if not series:
-            continue
-        down, cuts, longest = downtime(series, start, end)
-        pct = 100 * (1 - down / (hours * 3600))
-        rows.append((pct, f"{name[:32]:32} {pct:6.1f}% {cuts:5d} coupure(s), plus longue {longest / 60:4.0f} min   ({eid})"))
-    for _, line in sorted(rows):
-        print(line)
+    for name, r in sorted(res.items(), key=lambda kv: kv[1]["pct"]):
+        print(f"{name[:32]:32} {r['pct']:6.1f}% {r['cuts']:5d} coupure(s), plus longue {r['longest'] / 60:4.0f} min   ({r['eid']})")
 
 
 if __name__ == "__main__":

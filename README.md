@@ -636,3 +636,10 @@ Quand le compteur est disponible, les lignes Download / Upload du résumé ne do
 `python3 availability.py [heures] [mot ...]` calcule, d'après l'historique de HA, pour chaque **appareil** (nom affiché dans HA, ex. « Switch Abri ») le pourcentage de temps où il n'était pas « unavailable »,
 le nombre de coupures et la plus longue, les moins disponibles d'abord. Un mot filtre sur le nom de l'appareil ou de l'entité (ex. `python3 availability.py 48 abri chambre2`).
 Seul « unavailable » compte (« unknown » est normal pour certains capteurs). Utile pour juger une liaison Zigbee faible ; HA garde le détail 10 jours.
+
+## Santé du réseau Zigbee (`/zigbee`)
+`/zigbee [heures]` (administrateurs ; `/status zigbee` aussi) lit la liste des appareils ZHA dans HA (la commande WebSocket de la visualisation du réseau) et affiche, du moins bon au meilleur,
+pour chaque appareil : type (routeur, capteur sur pile), LQI et RSSI vus par le coordinateur, dernier contact, disponibilité sur la période avec le nombre de coupures et la plus longue (historique de HA),
+et ses voisins (appareils qu'il entend, avec le LQI). Repères : LQI < 80 ou RSSI < -85 dBm = lien faible, disponibilité < 98 % = coupures (⚠️). « Voisins » = ce que chacun entend, pas le chemin réel des messages.
+`/zigbee debug` montre les champs fournis par HA si un chiffre manque (selon la version de ZHA). Lecture seule : aucune commande n'est envoyée aux appareils. Sur le Pi : `python3 zigbee.py [heures] [debug]`.
+Les appareils Wi-Fi (Netatmo, Ecowitt…) n'ont pas de LQI : leur disponibilité se lit avec `python3 availability.py`.
