@@ -11,7 +11,7 @@ Protocole (lu dans l'interface web du routeur, pas de documentation officielle) 
 Le routeur n'accepte qu'un administrateur à la fois (se connecter déconnecte l'interface web) et bloque la connexion deux heures
 après dix échecs : après un échec de connexion, plus aucune tentative pendant BLOCK_AFTER_FAIL s. Au plus `max_per_day` SMS par jour.
 
-Test depuis le Pi :  python3 routersms.py "texte du SMS"   ·   python3 routersms.py --probe-inbox (réception, sans afficher les messages)
+Test depuis le Pi :  python3 routersms.py "texte du SMS"   ·   python3 routersms.py --probe-counters (compteurs de trafic, lecture seule)   ·   python3 routersms.py --probe-inbox (réception, sans afficher les messages)
 """
 import base64
 import contextlib
@@ -267,11 +267,54 @@ def probe_inbox_variants():
     return out
 
 
+PROBE_PAGES = ("MenuRpm.htm", "StatusRpm.htm", "SystemStatisticsRpm.htm", "StatisticsRpm.htm", "DataUsageRpm.htm", "TrafficStatisticsRpm.htm")
+PROBE_MODULES = ("status", "wan", "dataUsage", "trafficStatistics", "statistics", "networkInfo")  # lecture seulement (action 0)
+KEYWORDS = re.compile(r"byte|traffic|usage|flow|statist|rx|tx|sent|recv|volume|data", re.I)
+
+
+def probe_counters():
+    """Cherche dans l'interface du routeur des compteurs de trafic (lecture seule : pages en GET, modules JSON en action 0).
+    Enregistre les réponses brutes dans router_probe.json (reste sur le Pi) et retourne des lignes de texte : ce qui ressemble à un compteur."""
+    out, raw = [], {}
+    with router_session() as router:
+        for page in PROBE_PAGES:
+            try:
+                html = router._req(router.base + page)
+            except Exception as e:
+                out.append(f"page {page} : {type(e).__name__}")
+                continue
+            raw[page] = html
+            hits = sorted({m.group(0) for m in re.finditer(r"[A-Za-z_]*(?:[Bb]yte|[Tt]raffic|[Uu]sage|[Ss]tatistic|[Ff]low)[A-Za-z_]*", html)})
+            out.append(f"page {page} : {len(html)} caractères" + (f", mots : {', '.join(hits[:12])}" if hits else ""))
+        for module in PROBE_MODULES:
+            try:
+                resp = router._req(router.base + "lteWebCfg", json.dumps({"module": module, "action": 0}))
+                raw[f"module:{module}"] = resp
+                try:
+                    data = json.loads(resp)
+                except ValueError:
+                    out.append(f"module {module} : réponse non JSON ({resp[:60]!r})")
+                    continue
+                found = {k: v for k, v in data.items() if KEYWORDS.search(k)} if isinstance(data, dict) else {}
+                out.append(f"module {module} : clés {sorted(data) if isinstance(data, dict) else type(data).__name__}" + (f", compteurs : {found}" if found else ""))
+            except Exception as e:
+                out.append(f"module {module} : {type(e).__name__}: {e}")
+    (HERE / "router_probe.json").write_text(json.dumps(raw, ensure_ascii=False, indent=1))
+    return out
+
+
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--probe-reboot"]:  # décrit la requête de redémarrage sans l'envoyer
         ok, detail = reboot(dry_run=True)
         print(("✅ " if ok else "❌ ") + detail)
         sys.exit(0 if ok else 1)
+    if sys.argv[1:2] == ["--probe-counters"]:  # compteurs de trafic exposés par le routeur (lecture seule)
+        try:
+            print("\n".join(probe_counters()))
+        except Exception as e:
+            print(f"❌ {type(e).__name__}: {e}")
+            sys.exit(1)
+        sys.exit(0)
     if sys.argv[1:2] == ["--probe-inbox-variants"]:
         try:
             print("\n".join(probe_inbox_variants()))
