@@ -170,7 +170,7 @@ def member_allows(cmd, args):
     jamais désarmer, éteindre le Pi, remettre la data à zéro, ni /rearm, /git, /restart, /stop, /start."""
     if cmd.lstrip("/") not in MEMBER_COMMANDS:
         return False
-    return not (cmd == "/data" and args[:1] == ["reset"])
+    return not ((cmd == "/data" and args[:1] == ["reset"]) or (cmd == "/status" and args[:1] == ["zigbee"]))
 
 
 def help_text(role):
