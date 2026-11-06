@@ -623,3 +623,11 @@ Les capteurs download / upload de l'intégration routeur donnent, toutes les 30 
 Le résumé du matin affiche « Downloaded / Uploaded data : ≈ … » (« au moins » : intégrale des débits sur 24 h, un relevé valant au plus 2 min) et le pic ; `"traffic_volume": false`
 (dans `summary`) ne garde que les pics. `/data` ajoute la ligne « Routeur 4G, 24 dernières heures » et `/graph d data` trace les deux débits avec les totaux dans la légende.
 C'est un minimum : l'opérateur annonce davantage (≈ 40 à 60 % comptés les jours calmes) et un appel vidéo Teams de 30 min n'apparaît pas du tout dans ces capteurs (les jours d'appels, l'opérateur affiche des Go). `volume.py jj/mm [Mo opérateur]` compare un jour donné.
+
+## Compteur du routeur 4G (`routercount.py`)
+Le routeur TP-Link tient son propre compteur de trafic (module `status` de son interface web : `wan.dailyStatistics` = volume du jour, remis à zéro à minuit, et
+`wan.totalStatistics` = cumul depuis la mise en service). Contrairement aux capteurs de débit de HA, il compte tout ce qui passe par la 4G (appels vidéo compris).
+Un thread du listener le lit toutes les 30 minutes (`"router_counter": {"every_minutes": 30}`, `0` pour désactiver ; il faut le bloc `sms` pour l'adresse et le mot de passe du routeur)
+et garde les relevés dans `router_counter.csv` (sur le Pi, ignoré par git, 90 jours). `/data`, le résumé du matin et `/graph … data` affichent « Compteur du routeur 4G : aujourd'hui … · hier … · 24 h … ».
+Chaque lecture ouvre une session d'administration : l'interface web du routeur est déconnectée quelques secondes. Test : `python3 routercount.py` (une lecture, enregistrée).
+Quand le compteur est disponible, les lignes Download / Upload du résumé ne donnent plus que les pics de débit. `python3 routersms.py --probe-counters` a servi à trouver ce compteur.

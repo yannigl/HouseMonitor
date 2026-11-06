@@ -403,6 +403,14 @@ def numeric_line(name, unit, states):
             f"actuel {pts[-1][1]:g}{unit}")
 
 
+def routercount_text():
+    try:
+        import routercount
+        return routercount.text()
+    except Exception:
+        return ""
+
+
 def rate_role(name, unit):
     """« download » ou « upload » pour un capteur de débit du routeur, sinon None."""
     low = norm(name)
@@ -469,7 +477,7 @@ def traffic_line(name, unit, states, now=None):
     sens = "download" if "download" in low else "upload" if "upload" in low else None
     title = {"download": "Downloaded data", "upload": "Uploaded data"}.get(sens, f"{name} (volume)")
     peak_word = {"download": "pic de download", "upload": "pic d'upload"}.get(sens, "pic")
-    if not TRAFFIC_VOLUME:  # le volume calculé à partir de débits ponctuels est très inférieur au trafic réel : seulement le pic
+    if not TRAFFIC_VOLUME or routercount_text():  # compteur du routeur dispo (ou volume peu fiable) : seulement le pic ; le volume calculé à partir de débits ponctuels est très inférieur au trafic réel : seulement le pic
         return f"{peak_word.capitalize()} : {peak:g} {unit} à {hm(peak_t)}"
     return (f"{title} : au moins {fmt_bytes(total * RATE_BYTES[unit])} sur {HOURS} h · {peak_word} {peak:g} {unit} à {hm(peak_t)}")
 
@@ -1111,6 +1119,8 @@ def graph_report(args, debug=False):
         return f"Aucune mesure ({', '.join(metrics)}) dans l'historique de HA sur cette période."
     _, png, caption = attach_chart("", data, start, now)
     head = f"📈 {label}"
+    if "data" in metrics and routercount_text():
+        head += "\n" + routercount_text()
     if from_stats:
         head += " — statistiques de HA : moyenne par jour" + (" et zone min-max" if any(m in CHART_BAND for m in metrics) else "")
     if use_stats and from_stats == 0:
@@ -1321,12 +1331,19 @@ def build_report(with_chart=True):
         for dname in sorted(groups, key=str.lower):
             text += "\n" + "\n".join(group_block(dname, lines_of(groups[dname])))
     pi_lines = pi_data_lines()
-    if data_groups or pi_lines:  # volumes du routeur 4G, puis le calcul de data du Pi : mêmes en-têtes et sous-puces, sans ligne vide
+    if data_groups or pi_lines or routercount_text():  # volumes du routeur 4G, puis le calcul de data du Pi : mêmes en-têtes et sous-puces, sans ligne vide
         text += "\n\n📡 Data"
         for dname in sorted(data_groups, key=str.lower):
             text += (f"\n■ {dname}" if dname else "") + "\n" + "\n".join(lines_of(data_groups[dname]))
         if pi_lines:
             text += "\n" + "\n".join(pi_lines)
+        try:
+            import routercount
+            counter = routercount.text()
+        except Exception:
+            counter = ""
+        if counter:
+            text += "\n" + counter.replace("📶 ", "• ", 1)
     if skipped:
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"

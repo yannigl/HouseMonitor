@@ -17,3 +17,4 @@ modem_state.json
 temperatures.png
 export_*.csv
 router_probe.json
+router_counter.csv

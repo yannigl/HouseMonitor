@@ -41,6 +41,7 @@ import sound
 import control
 import heating
 import modemwatch
+import routercount
 import summary
 import vacuum
 from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, id_list, load_state, log_net,
@@ -384,7 +385,7 @@ def handle(text, st, role="admin", chat_id=None):
             log_net("listener")  # les octets en cours restent dans l'ancien cycle
             reset_cycle()
             return f"✅ Compteur remis à zéro\nAvant : {before}\n\n{data_block()}"
-        return "\n".join(x for x in (data_block(), "", summary.router_volume_text()) if x is not None).rstrip()
+        return "\n".join(x for x in (data_block(), "", routercount.text() or summary.router_volume_text()) if x is not None).rstrip()
     try:
         if cmd in ("/on", "/off"):
             return control.act(cmd == "/on", " ".join(parts[1:]) or None)
@@ -494,6 +495,7 @@ def loop():
           flush=True)
     arm.start_timers()  # retour automatique des /arm et /disarm temporaires
     modemwatch.start()  # thread : coupure d'Internet -> redémarrage automatique du modem (plafonné)
+    routercount.start()  # thread : compteur de trafic du routeur 4G, un relevé toutes les 30 min
     smsfwd.start()  # thread : SMS reçus par le routeur -> Telegram, indépendant de la page smsweb
     alerts.start()  # thread : première alerte du jour de chaque détecteur (si « alerts » est configuré)
     try:  # menu "/" de Telegram ; ~0,6 Ko, une fois au démarrage
