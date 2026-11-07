@@ -20,6 +20,19 @@ def fetch():
     return hastats.command(summary.HA, CFG["ha_token"], {"type": "zha/devices"})
 
 
+def num(v):
+    """Nombre, ou None : HA donne parfois le LQI / RSSI sous forme de texte (« 120 »), de décimal ou pas du tout."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def fmt(v):
+    n = num(v)
+    return "?" if n is None else f"{n:g}"
+
+
 def label(d):
     return d.get("user_given_name") or d.get("name") or d.get("ieee") or "?"
 
@@ -54,11 +67,11 @@ def kind(d):
 def neighbor_text(d, by_ieee):
     """Voisins que l'appareil entend, du meilleur LQI au moins bon (deux au plus)."""
     ns = [n for n in d.get("neighbors") or [] if isinstance(n, dict)]
-    ns.sort(key=lambda n: -(n.get("lqi") or 0))
+    ns.sort(key=lambda n: -(num(n.get("lqi")) or 0))
     out = []
     for n in ns[:2]:
         other = by_ieee.get(n.get("ieee"))
-        out.append(f"{label(other) if other else n.get('ieee', '?')} (LQI {n.get('lqi', '?')})")
+        out.append(f"{label(other) if other else n.get('ieee', '?')} (LQI {fmt(n.get('lqi'))})")
     return ", ".join(out)
 
 
@@ -83,19 +96,19 @@ def report(hours=24, debug=False):
     if coord:
         for n in coord.get("neighbors") or []:
             if isinstance(n, dict) and n.get("ieee"):
-                heard[n["ieee"]] = n.get("lqi")
+                heard[n["ieee"]] = num(n.get("lqi"))
     rows = []
     for d in devices:
         if d is coord:
             continue
         name = label(d)
-        lqi, rssi = d.get("lqi"), d.get("rssi")
+        lqi, rssi = num(d.get("lqi")), num(d.get("rssi"))
         av = norm_avail.get(summary.norm(name))
         score = (av["pct"] if av else 100.0)
-        weak = ((isinstance(lqi, (int, float)) and lqi < LQI_WEAK) or (isinstance(rssi, (int, float)) and rssi < RSSI_WEAK)
+        weak = ((lqi is not None and lqi < LQI_WEAK) or (rssi is not None and rssi < RSSI_WEAK)
                 or (av is not None and av["pct"] < AVAIL_WEAK) or d.get("available") is False)
         parts = [f"{kind(d)}"]
-        parts.append(f"LQI {lqi if lqi is not None else '?'} · RSSI {rssi if rssi is not None else '?'} dBm")
+        parts.append(f"LQI {fmt(lqi)} · RSSI {fmt(rssi)} dBm")
         if d.get("available") is False:
             parts.append("🔴 indisponible maintenant")
         if av:
@@ -109,7 +122,7 @@ def report(hours=24, debug=False):
             line += f"\n    voisins : {nb}"
         if coord and d.get("ieee") not in heard and heard:
             line += "\n    ℹ️ pas dans la table du coordinateur : relié par un autre appareil (relais) ou lien direct trop faible pour y figurer"
-        rows.append(((0 if weak else 1), score, lqi if isinstance(lqi, (int, float)) else 999, line))
+        rows.append(((0 if weak else 1), score, lqi if lqi is not None else 999, line))
     rows.sort(key=lambda r: r[:3])
     head = f"📡 Zigbee — {len(rows)} appareil(s), disponibilité sur {hours:g} h" + (f"\nCoordinateur : {label(coord)}" if coord else "")
     legend = f"\n\nRepères : LQI < {LQI_WEAK} ou RSSI < {RSSI_WEAK} dBm = lien faible ; dispo < {AVAIL_WEAK:g} % = coupures. LQI et RSSI sont vus par le coordinateur ; « voisins » = appareils entendus, pas le chemin réel."
