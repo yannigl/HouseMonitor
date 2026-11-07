@@ -85,5 +85,6 @@ def act(mode, chat_id=None):
             time.sleep(3)  # laisser Netatmo appliquer le changement avant de relire l'état
             after = {x["entity_id"]: x for x in _climates()}.get(eid, s)
             ok = (after.get("attributes", {}).get("preset_mode") or "").lower() == preset.lower()
-            out.append(f"• {'✅' if ok else '⚠️'} {_describe(after)}" + ("" if ok else " (le thermostat n'a pas encore confirmé)"))
+            out.append(f"• ✅ {_describe(after)}" if ok else
+                       f"• ⏳ {_describe(after)}\n   ordre envoyé ; Netatmo met à jour HA au prochain rafraîchissement (quelques minutes) : /heating pour vérifier")
     return "\n".join(out)
