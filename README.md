@@ -643,3 +643,6 @@ pour chaque appareil : type (routeur, capteur sur pile), LQI et RSSI vus par le 
 et ses voisins (appareils qu'il entend, avec le LQI). Repères : LQI < 80 ou RSSI < -85 dBm = lien faible, disponibilité < 98 % = coupures (⚠️). « Voisins » = ce que chacun entend, pas le chemin réel des messages.
 `/zigbee debug` montre les champs fournis par HA si un chiffre manque (selon la version de ZHA). Lecture seule : aucune commande n'est envoyée aux appareils. Sur le Pi : `python3 zigbee.py [heures] [debug]`.
 Les appareils Wi-Fi (Netatmo, Ecowitt…) n'ont pas de LQI : leur disponibilité se lit avec `python3 availability.py`.
+
+Après l'ordre, `/heating` (et `/away`, `/home`) relit l'état du thermostat toutes les 5 s pendant 30 s : ✅ dès que le preset est confirmé. Sinon ⏳ ; un message arrive ensuite
+dans le chat d'où l'ordre est parti quand Netatmo confirme (relecture toutes les 30 s, 15 min au plus), ou un ⚠️ si rien n'a changé au bout de 15 min. Un nouvel ordre arrête le suivi du précédent.
