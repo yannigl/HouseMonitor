@@ -121,6 +121,16 @@ def text():
     return "📶 Compteur du routeur 4G : " + " · ".join(parts)
 
 
+def yesterday_text():
+    """« Routeur 4G : hier X » (volume du jour précédent), ou une mention si le journal ne le couvre pas encore. '' si aucun relevé du tout."""
+    rows = load()
+    if not rows:
+        return ""
+    from common import fmt_bytes
+    y = day_volume(datetime.now().date() - timedelta(days=1), rows)
+    return f"Routeur 4G : hier {fmt_bytes(y)}" if y is not None else "Routeur 4G : hier pas encore mesuré (compteur démarré aujourd'hui)"
+
+
 def run():
     time.sleep(90)  # le Pi et le réseau démarrent
     while True:

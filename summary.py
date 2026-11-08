@@ -793,9 +793,12 @@ def pi_data_lines():
 def data_section_lines():
     """Section « 📡 Data » du résumé, trois lignes : total du routeur 4G (son propre compteur), calcul du script, reste du Pi (HA, système…)."""
     lines = []
-    counter = routercount_text()
-    lines.append("• " + counter.replace("📶 ", "", 1).replace("Compteur du routeur 4G", "Routeur 4G", 1) if counter
-                 else "• Routeur 4G : pas encore de relevé du compteur (voir /data)")
+    try:
+        import routercount
+        yesterday = routercount.yesterday_text()
+    except Exception:
+        yesterday = ""
+    lines.append("• " + (yesterday or "Routeur 4G : pas encore de relevé du compteur (voir /data)"))
     try:
         i = cycle_info()
         lines.append(f"• Script HouseMonitor (depuis le {i['start']:%d/%m}) : {fmt_bytes(i['script'])}")

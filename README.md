@@ -649,3 +649,4 @@ dans le chat d'où l'ordre est parti quand Netatmo confirme (relecture toutes le
 
 La section « 📡 Data » du résumé du matin tient en trois lignes : le compteur du routeur 4G (aujourd'hui · hier · 24 h), le calcul du script HouseMonitor et le reste du Pi (HA, système…).
 Le détail (Pi au total, remise à zéro du cycle, `/data reset`) reste dans `/data`.
+La ligne du routeur ne donne que le volume d'hier (le jour précédent complet) ; « aujourd'hui » et « 24 h » restent dans `/data`. `/update all` ajoute ces trois lignes à la fin de la liste des entités.

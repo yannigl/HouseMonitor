@@ -445,7 +445,7 @@ def handle(text, st, role="admin", chat_id=None):
             return summary.list_text(" ".join(parts[1:]) or None)
         if cmd == "/update":
             if parts[1:2] == ["all"]:
-                return summary.all_states_text()
+                return summary.all_states_text() + "\n\n📡 Data\n" + "\n".join(summary.data_section_lines())
             if parts[1:]:
                 return summary.all_states_text(" ".join(parts[1:]))
             text, png, caption = summary.build_report()
