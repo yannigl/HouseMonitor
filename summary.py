@@ -809,6 +809,30 @@ def data_section_lines():
     return lines
 
 
+def data_details_text():
+    """Détail de la data pour /update all : compteur du routeur (aujourd'hui, hier, 24 h), pics de débit download / upload, puis le bloc complet de /data
+    (script, Pi au total, reste du Pi, cycle et remise à zéro)."""
+    out = []
+    counter = routercount_text()
+    if counter:
+        out.append(counter)
+    try:
+        ents = {eid: (n, u) for eid, (n, u) in discover(states()).items() if eid.startswith("sensor.") and rate_role(n, u)}
+        if ents:
+            hist = history(list(ents))
+            for eid, (n, u) in sorted(ents.items(), key=lambda kv: kv[1][0]):
+                line = traffic_line(n, u, hist.get(eid, []))
+                if line:
+                    out.append(line)
+    except Exception as e:  # le détail ne doit jamais empêcher /update all
+        print(f"pics de débit illisibles : {type(e).__name__}: {e}", file=sys.stderr)
+    try:
+        out.append(data_block())
+    except Exception as e:
+        print(f"bloc data illisible : {type(e).__name__}: {e}", file=sys.stderr)
+    return "\n".join(out)
+
+
 def power_text():
     """Ligne « alimentation du Pi » : nombre d'alertes de sous-tension sur la fenêtre. Vide si rien n'est lisible
     (autre machine que le Pi, journal inaccessible)."""
