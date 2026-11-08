@@ -646,3 +646,6 @@ Les appareils Wi-Fi (Netatmo, Ecowitt…) n'ont pas de LQI : leur disponibilité
 
 Après l'ordre, `/heating` (et `/away`, `/home`) relit l'état du thermostat toutes les 5 s pendant 30 s : ✅ dès que le preset est confirmé. Sinon ⏳ ; un message arrive ensuite
 dans le chat d'où l'ordre est parti quand Netatmo confirme (relecture toutes les 30 s, 15 min au plus), ou un ⚠️ si rien n'a changé au bout de 15 min. Un nouvel ordre arrête le suivi du précédent.
+
+La section « 📡 Data » du résumé du matin tient en trois lignes : le compteur du routeur 4G (aujourd'hui · hier · 24 h), le calcul du script HouseMonitor et le reste du Pi (HA, système…).
+Le détail (Pi au total, remise à zéro du cycle, `/data reset`) reste dans `/data`.

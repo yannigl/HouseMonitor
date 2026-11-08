@@ -21,7 +21,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from common import CFG, count, data_block, fmt_bytes, heartbeat, id_list, load_state, log_net, norm
+from common import CFG, count, cycle_info, data_block, fmt_bytes, heartbeat, id_list, load_state, log_net, norm
 
 HA = CFG.get("ha_url", "http://127.0.0.1:8123")
 AUTH = {"Authorization": f"Bearer {CFG['ha_token']}"}
@@ -790,6 +790,22 @@ def pi_data_lines():
     return ["■ Calcul data Pi"] + [f"  • {i}" for i in items]
 
 
+def data_section_lines():
+    """Section « 📡 Data » du résumé, trois lignes : total du routeur 4G (son propre compteur), calcul du script, reste du Pi (HA, système…)."""
+    lines = []
+    counter = routercount_text()
+    lines.append("• " + counter.replace("📶 ", "", 1).replace("Compteur du routeur 4G", "Routeur 4G", 1) if counter
+                 else "• Routeur 4G : pas encore de relevé du compteur (voir /data)")
+    try:
+        i = cycle_info()
+        lines.append(f"• Script HouseMonitor (depuis le {i['start']:%d/%m}) : {fmt_bytes(i['script'])}")
+        if i["pi"] is not None:
+            lines.append(f"• Reste du Pi (HA, système…) : {fmt_bytes(max(0, i['pi'] - i['script']))}")
+    except Exception as e:  # le compteur de data ne doit jamais empêcher le résumé
+        print(f"calcul data Pi impossible : {type(e).__name__}: {e}", file=sys.stderr)
+    return lines
+
+
 def power_text():
     """Ligne « alimentation du Pi » : nombre d'alertes de sous-tension sur la fenêtre. Vide si rien n'est lisible
     (autre machine que le Pi, journal inaccessible)."""
@@ -1330,20 +1346,9 @@ def build_report(with_chart=True):
         text += "\n\n🏠 Appareils"
         for dname in sorted(groups, key=str.lower):
             text += "\n" + "\n".join(group_block(dname, lines_of(groups[dname])))
-    pi_lines = pi_data_lines()
-    if data_groups or pi_lines or routercount_text():  # volumes du routeur 4G, puis le calcul de data du Pi : mêmes en-têtes et sous-puces, sans ligne vide
-        text += "\n\n📡 Data"
-        for dname in sorted(data_groups, key=str.lower):
-            text += (f"\n■ {dname}" if dname else "") + "\n" + "\n".join(lines_of(data_groups[dname]))
-        if pi_lines:
-            text += "\n" + "\n".join(pi_lines)
-        try:
-            import routercount
-            counter = routercount.text()
-        except Exception:
-            counter = ""
-        if counter:
-            text += "\n" + counter.replace("📶 ", "• ", 1)
+    data_lines = data_section_lines()
+    if data_lines:  # trois lignes : total du routeur, calcul du script, reste du Pi
+        text += "\n\n📡 Data\n" + "\n".join(data_lines)
     if skipped:
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
