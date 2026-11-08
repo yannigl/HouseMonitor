@@ -651,3 +651,6 @@ La section « 📡 Data » du résumé du matin tient en trois lignes : le compt
 Le détail (Pi au total, remise à zéro du cycle, `/data reset`) reste dans `/data`.
 La ligne du routeur ne donne que le volume d'hier (le jour précédent complet) ; « aujourd'hui » et « 24 h » restent dans `/data`. `/update all` ajoute ces trois lignes à la fin de la liste des entités.
 `/update all` ajoute en plus, après les trois lignes, un « 📊 Détail data » : compteur du routeur (aujourd'hui · hier · 24 h), pics de débit download / upload, et le bloc complet de `/data` (script, Pi au total, reste du Pi, cycle).
+
+**Résumé plus court** : la ligne « ⚡ Alimentation du Pi » n'apparaît que s'il y a eu une alerte de sous-tension (ou une sous-tension / un bridage du CPU en ce moment). Une mesure presque constante s'écrit « Noise : 36dB (stable) » :
+`"stable_tolerance": {"dB": 2}` (dans `summary`, défaut) donne l'écart max-min toléré par unité ; ajoutez par exemple `"%": 1` ou `"hPa": 1` pour d'autres grandeurs.

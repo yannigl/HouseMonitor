@@ -386,6 +386,10 @@ def history(entity_ids, start=None, end=None):
     return {lst[0]["entity_id"]: lst for lst in data if lst}
 
 
+# Écart max-min (dans l'unité du capteur) en dessous duquel une mesure est dite stable : « Noise : 36dB (stable) » plutôt que la plage et les heures.
+STABLE_TOL = {k.lower(): v for k, v in _SUM.get("stable_tolerance", {"dB": 2}).items()}
+
+
 def numeric_line(name, unit, states):
     pts = []
     for s in states:
@@ -397,8 +401,8 @@ def numeric_line(name, unit, states):
         return None
     lo = min(pts, key=lambda p: p[1])
     hi = max(pts, key=lambda p: p[1])
-    if lo[1] == hi[1]:
-        return f"{name} : {lo[1]:g}{unit} (stable)"
+    if hi[1] - lo[1] <= STABLE_TOL.get(unit.lower(), 0):
+        return f"{name} : {pts[-1][1]:g}{unit} (stable)"
     return (f"{name} : {lo[1]:g}{unit} à {hm(lo[0])} → {hi[1]:g}{unit} à {hm(hi[0])}, "
             f"actuel {pts[-1][1]:g}{unit}")
 
@@ -855,8 +859,8 @@ def power_text():
     except (OSError, ValueError):
         uptime_h = HOURS
     since = (f" (depuis le démarrage, il y a {uptime_h:.0f} h)" if uptime_h < HOURS else f" sur {HOURS} h")
-    if not events:
-        return f"\n\n⚡ Alimentation du Pi : aucune alerte de sous-tension{since}{now_flag}"
+    if not events:  # rien à signaler : pas de ligne (sauf sous-tension ou bridage en ce moment)
+        return f"\n\n⚡ Alimentation du Pi{now_flag}" if now_flag else ""
     last = datetime.fromtimestamp(events[-1])
     return (f"\n\n⚡ Alimentation du Pi : {len(events)} alerte{'s' if len(events) > 1 else ''} de sous-tension{since}, "
             f"dernière à {last:%Hh%M}{now_flag}\n   → alimentation ou câble à vérifier")
