@@ -106,6 +106,23 @@ def pi_cum():
         return None
 
 
+def router_total_now():
+    """Dernier cumul `totalStatistics` du routeur 4G relevé dans router_counter.csv (voir routercount.py), None s'il n'y en a pas."""
+    try:
+        last = (HERE / "router_counter.csv").read_text().strip().splitlines()[-1]
+        return float(last.split(",")[1])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def router_base():
+    """Cumul du routeur au début du cycle (None si inconnu : cycle commencé avant les relevés du routeur)."""
+    try:
+        return json.loads(CYCLE_FILE.read_text()).get("router_base")
+    except (OSError, ValueError):
+        return None
+
+
 def cycle():
     """(début du cycle, jour d'ancrage, cumul du Pi au début du cycle). Par défaut : le 1er du mois courant.
     Le cycle avance tout seul d'un mois quand sa date de fin est passée."""
@@ -113,15 +130,17 @@ def cycle():
     try:
         c = json.loads(CYCLE_FILE.read_text())
         start, day, base = datetime.fromisoformat(c["start"]), int(c["day"]), c.get("pi_base") or 0
+        rbase = c.get("router_base")
     except (OSError, ValueError, KeyError):
-        start, day, base = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), 1, 0
+        start, day, base, rbase = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), 1, 0, None
     rolled = False
     while now >= _next_boundary(start, day):
         start, rolled = _next_boundary(start, day), True
     if rolled:
         base = pi_cum() or base
+        rbase = router_total_now()
     if rolled or not CYCLE_FILE.exists():
-        CYCLE_FILE.write_text(json.dumps({"start": start.isoformat(), "day": day, "pi_base": base}))
+        CYCLE_FILE.write_text(json.dumps({"start": start.isoformat(), "day": day, "pi_base": base, "router_base": rbase}))
     return start, day, base
 
 
@@ -129,7 +148,7 @@ def reset_cycle():
     """/data reset : le compteur repart de 0 maintenant, prochain reset le même jour du mois suivant."""
     now = datetime.now()
     CYCLE_FILE.write_text(json.dumps({"start": now.isoformat(timespec="seconds"), "day": now.day,
-                                      "pi_base": pi_cum() or 0}))
+                                      "pi_base": pi_cum() or 0, "router_base": router_total_now()}))
 
 
 def cycle_total():

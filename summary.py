@@ -178,7 +178,11 @@ def silent_devices(sts, dmap, hours=None):
 def silent_text(rows):
     if not rows:
         return ""
-    lines = [f"• {name} : aucune donnée depuis {t:%d/%m %Hh%M} ({fmt_age(age)})" for age, name, t, _ in rows]
+    def line(age, name, t):
+        if age >= 24:  # silence long : juste le nom (sans le préfixe « Netatmo Weather station - ») et la durée
+            return f"• {name.rsplit(' - ', 1)[-1]} - {fmt_age(age)}"
+        return f"• {name} : aucune donnée depuis {t:%d/%m %Hh%M} ({fmt_age(age)})"
+    lines = [line(age, name, t) for age, name, t, _ in rows]
     return "\n\n⚠️ Sans nouvelles\n" + "\n".join(lines)
 
 
@@ -387,6 +391,7 @@ def history(entity_ids, start=None, end=None):
 
 
 # Écart max-min (dans l'unité du capteur) en dessous duquel une mesure est dite stable : « Noise : 36dB (stable) » plutôt que la plage et les heures.
+EVENT_ONLY = [norm(x) for x in _SUM.get("event_only", ["event rain"])]  # « Event Rain : 1mm à 01h21 » : l'événement et son heure, sans le point de départ à 0
 STABLE_TOL = {k.lower(): v for k, v in _SUM.get("stable_tolerance", {"dB": 2, "%": 2, "hPa": 1}).items()}
 
 
@@ -403,6 +408,8 @@ def numeric_line(name, unit, states):
         unit = " " + unit
     lo = min(pts, key=lambda p: p[1])
     hi = max(pts, key=lambda p: p[1])
+    if lo[1] == 0 and hi[1] > 0 and any(w in norm(name) for w in EVENT_ONLY):
+        return f"{name} : {hi[1]:g}{unit} à {hm(hi[0])}"
     if hi[1] - lo[1] <= STABLE_TOL.get(unit.lower(), 0):
         return f"{name} : {pts[-1][1]:g}{unit} (stable)"
     return (f"{name} : {lo[1]:g}{unit} à {hm(lo[0])} → {hi[1]:g}{unit} à {hm(hi[0])}, "
@@ -633,7 +640,7 @@ def switch_info(states, current=None):
     """(heures des passages à 'on', statut actuel en français). `current` : état actuel lu directement dans HA."""
     ev = on_events(states)
     state = current if current is not None else (states[-1]["state"] if states else "off")
-    return ev, ("indisponible" if state == "unavailable" else "allumé" if state == "on" else "éteint")
+    return ev, ("indisponible" if state == "unavailable" else "on" if state == "on" else "off")
 
 
 def times_text(ev, last_word):
@@ -643,8 +650,8 @@ def times_text(ev, last_word):
 def switch_line(name, states):
     ev, cur = switch_info(states)
     if not ev:
-        return None if cur == "éteint" else f"{name} : {cur}, aucun cycle"
-    return f"{name} : {len(ev)} cycle{'s' if len(ev) > 1 else ''} ({times_text(ev, 'dernier')}), {cur}"
+        return None if cur == "off" else f"{name} : {cur} (0 cycles)"
+    return f"{name} : {cur} ({len(ev)} cycle{'s' if len(ev) > 1 else ''} : {times_text(ev, 'dernier')})"
 
 
 def floats(states):
@@ -723,14 +730,13 @@ def device_lines(ents, hist, dmap, cur, skip_devs=()):
             except (TypeError, ValueError):
                 pass
         warn = next(filter(None, (volt_note(hist.get(e, [])) for e in sensors if ents[e][1] == "V")), None)
-        text = (f"{dev_name} : " + (f"{len(ev)} cycle{'s' if len(ev) > 1 else ''} ({times_text(ev, 'dernier')})"
-                                    if ev else "aucun cycle") + f", {status}")
-        if total is not None:
-            text += f" · énergie totale {fmt_kwh(total)}"
+        text = f"{dev_name} : {status} (" + (f"{len(ev)} cycle{'s' if len(ev) > 1 else ''} : {times_text(ev, 'dernier')}" if ev else "0 cycles") + ")"
+        if total is not None:  # compteur d'énergie cumulé de la prise (« 0,37 kWh »), puis ce qui s'y est ajouté par jour
+            text += f" · {fmt_kwh(total)}"
             if energy is not None:
-                text += f" (+{fmt_kwh(energy)} sur {HOURS} h)"
+                text += f" (+{fmt_kwh(energy).replace(' kWh', '')}/j)"
         elif energy is not None:
-            text += f" · énergie {HOURS} h : {fmt_kwh(energy)}"
+            text += f" · {fmt_kwh(energy).replace(' kWh', '')} kWh/j"
         if warn:
             text += f" · {warn}"
         lines.append(text)
@@ -797,22 +803,33 @@ def pi_data_lines():
 
 
 def data_section_lines():
-    """Section « 📡 Data » du résumé, trois lignes : total du routeur 4G (son propre compteur), calcul du script, reste du Pi (HA, système…)."""
-    lines = []
-    try:
-        import routercount
-        yesterday = routercount.yesterday_text()
-    except Exception:
-        yesterday = ""
-    lines.append("• " + (yesterday or "Routeur 4G : pas encore de relevé du compteur (voir /data)"))
+    """Section « 📡 Data (depuis le jj/mm) » du résumé : routeur 4G (compteur du routeur depuis le début du cycle, +volume d'hier par jour), calcul du script,
+    reste du Pi. Retourne (titre, lignes)."""
+    lines, since = [], datetime.now()
     try:
         i = cycle_info()
-        lines.append(f"• Script HouseMonitor (depuis le {i['start']:%d/%m}) : {fmt_bytes(i['script'])}")
-        if i["pi"] is not None:
-            lines.append(f"• Reste du Pi (HA, système…) : {fmt_bytes(max(0, i['pi'] - i['script']))}")
+        since = i["start"]
     except Exception as e:  # le compteur de data ne doit jamais empêcher le résumé
         print(f"calcul data Pi impossible : {type(e).__name__}: {e}", file=sys.stderr)
-    return lines
+        i = None
+    try:
+        import routercount
+        from common import router_base
+        vol, partial = routercount.cycle_volume(since, router_base())
+        yest = routercount.day_volume(datetime.now().date() - timedelta(days=1))
+    except Exception as e:
+        print(f"compteur du routeur illisible : {type(e).__name__}: {e}", file=sys.stderr)
+        vol, partial, yest = None, None, None
+    if vol is None:
+        lines.append("• Routeur 4G : pas encore de relevé du compteur (voir /data)")
+    else:
+        lines.append(f"• Routeur 4G : {fmt_bytes(vol)}" + (f" (+{fmt_bytes(yest)}/j)" if yest is not None else "")
+                     + (f" (compteur lu depuis le {partial:%d/%m})" if partial else ""))
+    if i:
+        lines.append(f"• Script HouseMonitor : {fmt_bytes(i['script'])}")
+        if i["pi"] is not None:
+            lines.append(f"• Reste du Pi (HA, système…) : {fmt_bytes(max(0, i['pi'] - i['script']))}")
+    return f"📡 Data (depuis le {since:%d/%m})", lines
 
 
 def data_details_text():
@@ -1383,9 +1400,9 @@ def build_report(with_chart=True):
         text += "\n\n🏠 Appareils"
         for dname in sorted(groups, key=str.lower):
             text += "\n" + "\n".join(group_block(dname, lines_of(groups[dname])))
-    data_lines = data_section_lines()
+    data_title, data_lines = data_section_lines()
     if data_lines:  # trois lignes : total du routeur, calcul du script, reste du Pi
-        text += "\n\n📡 Data\n" + "\n".join(data_lines)
+        text += f"\n\n{data_title}\n" + "\n".join(data_lines)
     if skipped:
         shown = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"

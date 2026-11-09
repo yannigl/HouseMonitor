@@ -104,6 +104,25 @@ def day_volume(day, rows=None):
     return v
 
 
+def cycle_volume(start, base=None, rows=None):
+    """Volume (octets) du routeur depuis le début du cycle `start` (datetime locale). `base` : cumul du routeur à la remise à zéro (common.router_base) ;
+    sans lui, d'après le journal : cumul au relevé le plus proche du début, ou, si les relevés commencent après, le cumul de minuit de leur premier jour.
+    -> (octets, depuis) : `depuis` = date des premiers relevés si le journal ne couvre pas tout le cycle, sinon None. (None, None) sans relevé."""
+    rows = rows if rows is not None else load()
+    if not rows:
+        return None, None
+    last = rows[-1]
+    if base is not None and last[1] >= base:
+        return last[1] - base, None
+    before = [x for x in rows if x[0] <= start]
+    if before:
+        return delta(rows, rows.index(before[-1]), len(rows) - 1), None
+    first = rows[0]
+    midnight_total = first[1] - first[2]  # cumul à minuit du premier jour de relevés (dailyStatistics = octets depuis minuit)
+    partial = first[0].date() > start.date()
+    return max(0.0, delta(rows, 0, len(rows) - 1) + (first[1] - midnight_total)), (first[0].date() if partial else None)
+
+
 def text():
     """Lignes pour /data et le résumé : compteur du routeur, aujourd'hui / hier / 24 h. '' si pas encore de relevé."""
     rows = load()
