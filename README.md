@@ -654,7 +654,7 @@ La ligne du routeur ne donne que le volume d'hier (le jour précédent complet) 
 
 **Résumé plus court** : la ligne « ⚡ Alimentation du Pi » n'apparaît que s'il y a eu une alerte de sous-tension (ou une sous-tension / un bridage du CPU en ce moment). Une mesure presque constante s'écrit « Noise : 36dB (stable) » :
 `"stable_tolerance": {"dB": 2}` (dans `summary`, défaut) donne l'écart max-min toléré par unité ; ajoutez par exemple `"%": 1` ou `"hPa": 1` pour d'autres grandeurs.
-Un redémarrage du Pi dans les dernières 24 h ajoute « 🔛 Pi redémarré à hh:mm (il y a N h) » au résumé (d'après /proc/uptime : seul un redémarrage du Pi compte, pas celui du listener).
+Un redémarrage du Pi dans les dernières 24 h ajoute « ⏻ Pi redémarré à hh:mm (il y a N h) » au résumé (d'après /proc/uptime : seul un redémarrage du Pi compte, pas celui du listener).
 Tolérances « stable » par défaut : 2 dB, 2 % (humidité…), 1 hPa.
 
 **Résumé, mise en forme** : silences de plus de 24 h réduits à « nom - N j » (nom sans le préfixe avant le dernier « - ») ; prises « on / off (N🔄 heures) · 0,37 kWh (+0,02/j) » (🔄 = cycles, soit les passages à « on ») (compteur cumulé de la prise, puis ce qui s'y est ajouté par jour) ;

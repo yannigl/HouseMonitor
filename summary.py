@@ -881,7 +881,7 @@ def power_text():
     reboot = ""
     if uptime_h < HOURS:  # le Pi a redémarré dans la fenêtre du résumé (coupure de courant, reboot, mise à jour) : jamais passé sous silence
         booted = datetime.now() - timedelta(hours=uptime_h)
-        reboot = f"\n\n🔛 Pi redémarré à {booted:%Hh%M}{'' if booted.date() == datetime.now().date() else ' hier'} (il y a {uptime_h:.0f} h)"
+        reboot = f"\n\n⏻ Pi redémarré à {booted:%Hh%M}{'' if booted.date() == datetime.now().date() else ' hier'} (il y a {uptime_h:.0f} h)"
     if not events:  # pas d'alerte : pas de ligne « alimentation » (sauf sous-tension ou bridage en ce moment)
         return reboot + (f"\n\n⚡ Alimentation du Pi{now_flag}" if now_flag else "")
     last = datetime.fromtimestamp(events[-1])
