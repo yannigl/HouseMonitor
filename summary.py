@@ -399,6 +399,8 @@ def numeric_line(name, unit, states):
             pass  # unavailable / unknown / état nul (marque de suppression d'une entité dans l'historique)
     if not pts:
         return None
+    if " " in unit:  # unité en plusieurs mots (« UV index ») : séparée de la valeur
+        unit = " " + unit
     lo = min(pts, key=lambda p: p[1])
     hi = max(pts, key=lambda p: p[1])
     if hi[1] - lo[1] <= STABLE_TOL.get(unit.lower(), 0):
