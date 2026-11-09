@@ -650,8 +650,8 @@ def times_text(ev, last_word):
 def switch_line(name, states):
     ev, cur = switch_info(states)
     if not ev:
-        return None if cur == "off" else f"{name} : {cur} (0 cycles)"
-    return f"{name} : {cur} ({len(ev)} cycle{'s' if len(ev) > 1 else ''} : {times_text(ev, 'dernier')})"
+        return None if cur == "off" else f"{name} : {cur} (0🔁)"
+    return f"{name} : {cur} ({len(ev)}🔁 {times_text(ev, 'dernier')})"
 
 
 def floats(states):
@@ -730,7 +730,7 @@ def device_lines(ents, hist, dmap, cur, skip_devs=()):
             except (TypeError, ValueError):
                 pass
         warn = next(filter(None, (volt_note(hist.get(e, [])) for e in sensors if ents[e][1] == "V")), None)
-        text = f"{dev_name} : {status} (" + (f"{len(ev)} cycle{'s' if len(ev) > 1 else ''} : {times_text(ev, 'dernier')}" if ev else "0 cycles") + ")"
+        text = f"{dev_name} : {status} (" + (f"{len(ev)}🔁 {times_text(ev, 'dernier')}" if ev else "0🔁") + ")"  # 🔁 = cycles (passages à « on »)
         if total is not None:  # compteur d'énergie cumulé de la prise (« 0,37 kWh »), puis ce qui s'y est ajouté par jour
             text += f" · {fmt_kwh(total)}"
             if energy is not None:
