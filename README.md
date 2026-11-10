@@ -657,7 +657,7 @@ La ligne du routeur ne donne que le volume d'hier (le jour précédent complet) 
 Un redémarrage du Pi dans les dernières 24 h ajoute « ⏻ Pi redémarré à hh:mm (il y a N h) » au résumé (d'après /proc/uptime : seul un redémarrage du Pi compte, pas celui du listener).
 Tolérances « stable » par défaut : 2 dB, 2 % (humidité…), 1 hPa.
 
-**Résumé, mise en forme** : silences de plus de 24 h réduits à « nom - N j » (nom sans le préfixe avant le dernier « - ») ; prises « on / off (N🔄 heures) · 0,37 kWh (+0,02/j) » (🔄 = cycles, soit les passages à « on ») (compteur cumulé de la prise, puis ce qui s'y est ajouté par jour) ;
-« Event Rain : 1mm à 01h21 » (`"event_only": ["event rain"]` dans `summary`) ; section « 📡 Data (depuis le jj/mm) » : routeur 4G = cumul du compteur du routeur depuis la remise à zéro du cycle (+volume d'hier par jour), script, reste du Pi.
+**Résumé, mise en forme** : silences de plus de 24 h réduits à « nom - N j » (nom sans le préfixe avant le dernier « - ») ; prises « on / off (N↻ heures) · 0,37 kWh (+0,02/j) » (↻ = cycles, soit les passages à « on ») (compteur cumulé de la prise, puis ce qui s'y est ajouté par jour) ;
+« Event Rain : 1mm à 01h21 » (`"event_only": ["event rain"]` dans `summary`) ; section « 📡 Data depuis le jj/mm (hier) » : trois lignes « cumul du cycle (+volume d'hier) » : routeur 4G (compteur du routeur), script, reste du Pi (le Pi garde ses relevés horaires dans `pi_counter.csv` : l'hier du Pi et du reste du Pi n'apparaît qu'après deux jours de relevés).
 `/data reset` enregistre aussi le cumul du routeur à cet instant (`router_base` dans le fichier du cycle) : le total du routeur repart de zéro avec les autres compteurs. Si les relevés du routeur sont plus récents que le cycle, la ligne le dit (« compteur lu depuis le … »).
 `python3 firstseen.py [mot]` donne la date de départ d'un compteur d'énergie (premières statistiques de HA).

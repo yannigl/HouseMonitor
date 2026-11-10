@@ -162,6 +162,48 @@ def cycle_total():
     return total
 
 
+PILOG = HERE / "pi_counter.csv"  # relevés horaires du cumul du Pi (heure ISO, octets) : de quoi calculer le volume d'un jour
+
+
+def log_pi(cum):
+    """Ajoute un relevé du cumul du Pi (rien si le compteur n'est pas installé) et garde 120 jours."""
+    if cum is None:
+        return
+    now = datetime.now()
+    lines = PILOG.read_text().splitlines() if PILOG.exists() else []
+    cutoff = (now - timedelta(days=120)).isoformat()
+    lines = [l for l in lines if l.split(",")[0] >= cutoff]
+    lines.append(f"{now.isoformat(timespec='seconds')},{cum:.0f}")
+    PILOG.write_text("\n".join(lines) + "\n")
+
+
+def _at(rows, t, tol=timedelta(minutes=90)):
+    best = min(rows, key=lambda r: abs(r[0] - t), default=None)
+    return best if best and abs(best[0] - t) <= tol else None
+
+
+def pi_day_volume(day):
+    """Octets du Pi le jour `day` (date) : cumul de minuit à minuit d'après les relevés horaires (None s'ils ne couvrent pas ce jour)."""
+    try:
+        rows = [(datetime.fromisoformat(l.split(",")[0]), float(l.split(",")[1])) for l in PILOG.read_text().splitlines() if l]
+    except (OSError, ValueError, IndexError):
+        return None
+    t0 = datetime(day.year, day.month, day.day)
+    a, b = _at(rows, t0), _at(rows, t0 + timedelta(days=1))
+    return max(0.0, b[1] - a[1]) if a and b and b[0] > a[0] else None
+
+
+def script_day_volume(day):
+    """Octets du script le jour `day` (date) d'après netlog.csv (la ligne écrite juste après minuit compte pour la veille : fenêtre de 00h10 à 00h10). None sans ligne."""
+    try:
+        t0 = datetime(day.year, day.month, day.day)
+        lo, hi = (t0 + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"), (t0 + timedelta(days=1, minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        vals = [int(l.split(",")[-1]) for l in NETLOG.read_text().splitlines()[1:] if lo <= l.split(",")[0] <= hi]
+    except (OSError, ValueError, IndexError):
+        return None
+    return float(sum(vals)) if vals else None
+
+
 def fmt_bytes(n):
     n = float(n)
     if n < 1024:

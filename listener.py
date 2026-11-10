@@ -45,7 +45,7 @@ import routercount
 import summary
 import vacuum
 import zigbee
-from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, id_list, load_state, log_net,
+from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, id_list, load_state, log_net, log_pi,
                     pi_cum, reset_cycle, save_state)
 
 TOKEN = CFG["telegram_token"]
@@ -522,8 +522,8 @@ def loop():
         if now - last_ping >= PING_EVERY:
             last_ping = ping_stamp(heartbeat(), now)  # ne fait rien si /stop ping
 
-        if now - last_sample >= 3600:  # compteur du Pi : une lecture par heure (il repart à 0 au reboot)
-            pi_cum()
+        if now - last_sample >= 3600:  # compteur du Pi : une lecture par heure (il repart à 0 au reboot), gardée pour le volume d'hier
+            log_pi(pi_cum())
             last_sample = now
 
         if datetime.now().day != last_log_day:  # une ligne de data par jour

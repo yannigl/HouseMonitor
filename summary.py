@@ -55,7 +55,7 @@ ORDER = [[norm(x) for x in g] for g in _SUM.get("order", [["monthly rain", "even
 ANNOTATE = [{"entity": norm(a["entity"]), "with": norm(a["with"]), "label": a.get("label", ""), "mode": a.get("mode", "range")}
             for a in _SUM.get("annotate", [
                 {"entity": "indoor temperature", "with": "indoor dewpoint", "label": "dew point", "mode": "range"},
-                {"entity": "monthly rain", "with": "daily rain", "label": "daily", "mode": "yesterday"}])]
+                {"entity": "monthly rain", "with": "daily rain", "label": "", "mode": "yesterday"}])]
 # Volume échangé calculé en intégrant les débits relevés par HA (un relevé toutes les 30 s ; une caméra Wi-Fi y apparaît). Valeur MINIMALE : un appel vidéo
 # Teams de 30 min (Wi-Fi + routeur) n'y apparaît pas du tout, et l'opérateur compte davantage. `"traffic_volume": false` ne garde que les pics.
 TRAFFIC_VOLUME = CFG.get("summary", {}).get("traffic_volume", True)
@@ -408,7 +408,7 @@ def numeric_line(name, unit, states):
         unit = " " + unit
     lo = min(pts, key=lambda p: p[1])
     hi = max(pts, key=lambda p: p[1])
-    if lo[1] == 0 and hi[1] > 0 and any(w in norm(name) for w in EVENT_ONLY):
+    if hi[1] > 0 and any(w in norm(name) for w in EVENT_ONLY):
         return f"{name} : {hi[1]:g}{unit} à {hm(hi[0])}"
     if hi[1] - lo[1] <= STABLE_TOL.get(unit.lower(), 0):
         return f"{name} : {pts[-1][1]:g}{unit} (stable)"
@@ -650,8 +650,8 @@ def times_text(ev, last_word):
 def switch_line(name, states):
     ev, cur = switch_info(states)
     if not ev:
-        return None if cur == "off" else f"{name} : {cur} (0🔄)"
-    return f"{name} : {cur} ({len(ev)}🔄 {times_text(ev, 'dernier')})"
+        return None if cur == "off" else f"{name} : {cur} (0↻)"
+    return f"{name} : {cur} ({len(ev)}↻ {times_text(ev, 'dernier')})"
 
 
 def floats(states):
@@ -730,7 +730,7 @@ def device_lines(ents, hist, dmap, cur, skip_devs=()):
             except (TypeError, ValueError):
                 pass
         warn = next(filter(None, (volt_note(hist.get(e, [])) for e in sensors if ents[e][1] == "V")), None)
-        text = f"{dev_name} : {status} (" + (f"{len(ev)}🔄 {times_text(ev, 'dernier')}" if ev else "0🔄") + ")"  # 🔄 = cycles (passages à « on »)
+        text = f"{dev_name} : {status} (" + (f"{len(ev)}↻ {times_text(ev, 'dernier')}" if ev else "0↻") + ")"  # ↻ = cycles (passages à « on »)
         if total is not None:  # compteur d'énergie cumulé de la prise (« 0,37 kWh »), puis ce qui s'y est ajouté par jour
             text += f" · {fmt_kwh(total)}"
             if energy is not None:
@@ -803,9 +803,11 @@ def pi_data_lines():
 
 
 def data_section_lines():
-    """Section « 📡 Data (depuis le jj/mm) » du résumé : routeur 4G (compteur du routeur depuis le début du cycle, +volume d'hier par jour), calcul du script,
-    reste du Pi. Retourne (titre, lignes)."""
+    """Section « 📡 Data depuis le jj/mm (hier) » : trois lignes « cumul du cycle (+volume d'hier) » : routeur 4G (compteur du routeur), script, reste du Pi.
+    Retourne (titre, lignes)."""
     lines, since = [], datetime.now()
+    yday = datetime.now().date() - timedelta(days=1)
+    plus = lambda v: f" (+{fmt_bytes(v)})" if v is not None else ""
     try:
         i = cycle_info()
         since = i["start"]
@@ -814,22 +816,22 @@ def data_section_lines():
         i = None
     try:
         import routercount
-        from common import router_base
+        from common import pi_day_volume, router_base, script_day_volume
         vol, partial = routercount.cycle_volume(since, router_base())
-        yest = routercount.day_volume(datetime.now().date() - timedelta(days=1))
+        r_y, s_y, p_y = routercount.day_volume(yday), script_day_volume(yday), pi_day_volume(yday)
     except Exception as e:
         print(f"compteur du routeur illisible : {type(e).__name__}: {e}", file=sys.stderr)
-        vol, partial, yest = None, None, None
+        vol, partial, r_y, s_y, p_y = None, None, None, None, None
     if vol is None:
         lines.append("• Routeur 4G : pas encore de relevé du compteur (voir /data)")
     else:
-        lines.append(f"• Routeur 4G : {fmt_bytes(vol)}" + (f" (+{fmt_bytes(yest)}/j)" if yest is not None else "")
-                     + (f" (compteur lu depuis le {partial:%d/%m})" if partial else ""))
+        lines.append(f"• Routeur 4G : {fmt_bytes(vol)}{plus(r_y)}" + (f" — compteur lu depuis le {partial:%d/%m}" if partial else ""))
     if i:
-        lines.append(f"• Script HouseMonitor : {fmt_bytes(i['script'])}")
+        lines.append(f"• Script HouseMonitor : {fmt_bytes(i['script'])}{plus(s_y)}")
         if i["pi"] is not None:
-            lines.append(f"• Reste du Pi (HA, système…) : {fmt_bytes(max(0, i['pi'] - i['script']))}")
-    return f"📡 Data (depuis le {since:%d/%m})", lines
+            rest_y = None if p_y is None else max(0.0, p_y - (s_y or 0.0))
+            lines.append(f"• Reste du Pi (HA, système…) : {fmt_bytes(max(0, i['pi'] - i['script']))}{plus(rest_y)}")
+    return f"📡 Data depuis le {since:%d/%m} (hier)", lines
 
 
 def data_details_text():
