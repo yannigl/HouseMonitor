@@ -358,6 +358,11 @@ def all_states_text(query=None):
 
     def value(s):
         a = s.get("attributes", {})
+        if s["entity_id"].startswith("climate.") and s["state"] not in ("unknown", "unavailable"):  # thermostat : mesure et consigne sont des attributs
+            bits = [f"preset « {a['preset_mode']} »" if a.get("preset_mode") else "", f"consigne {a['temperature']}°C" if a.get("temperature") is not None else "",
+                    f"mesure {a['current_temperature']}°C" if a.get("current_temperature") is not None else "",
+                    f"chauffe : {a['hvac_action']}" if a.get("hvac_action") else ""]
+            return ", ".join([s["state"]] + [b for b in bits if b])
         return s["state"] + ("" if s["state"] in ("unknown", "unavailable") else a.get("unit_of_measurement", ""))
 
     out = [f"🔄 États au {datetime.now():%d/%m %Hh%M}"
