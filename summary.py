@@ -1124,7 +1124,16 @@ def generic_graph(tokens, label, start, now, debug=False):
         blob = norm(" ".join(x for x in (eid, name, (dmap.get(eid) or {}).get("n"), (dmap.get(eid) or {}).get("o")) if x))
         if all(t in blob or ALIASES.get(t, t) in blob or t == norm(unit) for t in tokens):
             found.append((eid, name, unit))
-    if not found:
+    climates = []  # thermostats : mesure et consigne sont des ATTRIBUTS de l'entité climate, pas des capteurs
+    for st in sts:
+        eid = st["entity_id"]
+        if not eid.startswith("climate."):
+            continue
+        name = (st.get("attributes") or {}).get("friendly_name", eid)
+        blob = norm(" ".join(x for x in (eid, name, (dmap.get(eid) or {}).get("n")) if x))
+        if all(t in blob or ALIASES.get(t, t) in blob or t in ("temperature", "thermostat", "chauffage") for t in tokens):
+            climates.append((eid, name))
+    if not found and not climates:
         return f"Aucune série numérique ne correspond à « {' '.join(tokens)} ».\n\n{GRAPH_USAGE}"
     found.sort(key=lambda f: (f[2], f[1].lower()))
     units = []
@@ -1132,10 +1141,12 @@ def generic_graph(tokens, label, start, now, debug=False):
         if u not in units:
             units.append(u)
     keep_units = units[:4]
-    shown = [f for f in found if f[2] in keep_units][:len(chart.PALETTE)]
+    room = max(0, len(chart.PALETTE) - len(climates))
+    shown = [f for f in found if f[2] in keep_units][:room]
     skipped = len(found) - len(shown)
     if debug:
-        return f"🔧 /graph {' '.join(tokens)} : {len(found)} série(s)\n" + "\n".join(f"• {e} [{u}] {n}" for e, n, u in found)
+        return (f"🔧 /graph {' '.join(tokens)} : {len(found)} série(s), {len(climates)} thermostat(s)\n"
+                + "\n".join(f"• {e} [{u}] {n}" for e, n, u in found) + "".join(f"\n• {e} [°C : mesure et consigne] {n}" for e, n in climates))
     use_stats = (now - start) > timedelta(days=STATS_MIN_DAYS)
     long_span = (now - start) > timedelta(days=1.5)
     stats = {}
@@ -1145,8 +1156,10 @@ def generic_graph(tokens, label, start, now, debug=False):
             stats = hastats.statistics(HA, CFG["ha_token"], [e for e, _, _ in shown], start.astimezone(), now.astimezone(), "day")
         except Exception as e:
             print(f"statistiques de HA illisibles : {type(e).__name__}: {e}", file=sys.stderr)
-    hist = {} if stats and all(stats.get(e) for e, _, _ in shown) else history([e for e, _, _ in shown], start.astimezone(), None)
+    hist = {} if (not shown or (stats and all(stats.get(e) for e, _, _ in shown))) else history([e for e, _, _ in shown], start.astimezone(), None)
     panels = {u: {"unit": u, "series": [], "ref": None, "clamp": None} for u in keep_units}
+    if climates and "°C" not in panels:
+        panels["°C"] = {"unit": "°C", "series": [], "ref": None, "clamp": None}
     legend = []
     for i, (eid, name, unit) in enumerate(shown):
         emoji, rgb = chart.PALETTE[i]
@@ -1160,6 +1173,23 @@ def generic_graph(tokens, label, start, now, debug=False):
             continue
         panels[unit]["series"].append((rgb, pts, False, False))
         legend.append(f"{emoji} {name} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
+    if climates:  # l'historique complet (avec attributs) : seulement pour les thermostats ; 10 jours au plus (pas de statistiques à long terme pour des attributs)
+        full = http(f"{HA}/api/history/period/{start.astimezone().isoformat()}?" + urllib.parse.urlencode(
+            {"filter_entity_id": ",".join(e for e, _ in climates), "end_time": datetime.now(timezone.utc).isoformat(), "significant_changes_only": "0"}), AUTH)
+        rows = {lst[0]["entity_id"]: lst for lst in full if lst}
+        for j, (eid, name) in enumerate(climates):
+            emoji, rgb = chart.PALETTE[len(shown) + j]
+            parts = []
+            for attr, word, dashed in (("current_temperature", "mesure", False), ("temperature", "consigne", True)):
+                fake = [{"state": str(r["attributes"][attr]), "last_changed": r.get("last_updated") or r["last_changed"]}
+                        for r in rows.get(eid, []) if isinstance(r.get("attributes"), dict) and isinstance(r["attributes"].get(attr), (int, float))]
+                pts = chart_points(fake, start, now, 700 if long_span else None)
+                vals = [v for _, v in pts if v is not None]
+                if vals:
+                    panels["°C"]["series"].append((rgb, pts, False, dashed))
+                    parts.append(f"{word} {min(vals):g} → {max(vals):g}, actuel {vals[-1]:g}")
+            if parts:
+                legend.append(f"{emoji} {name} (consigne en pointillés) : " + " · ".join(parts) + " °C")
     panels = [p for p in panels.values() if p["series"]]
     if not panels:
         return f"Aucune mesure pour « {' '.join(tokens)} » dans l'historique de HA sur cette période."
@@ -1168,7 +1198,7 @@ def generic_graph(tokens, label, start, now, debug=False):
     except Exception as e:
         print(f"graphique impossible : {type(e).__name__}: {e}", file=sys.stderr)
         return "Graphique impossible (voir le journal du listener)."
-    head = f"📈 {label} — « {' '.join(tokens)} » : {len(legend)} série(s)"
+    head = f"📈 {label} — « {' '.join(tokens)} » : {len(legend)} série(s)" + (" (thermostat : 10 jours au plus)" if climates and use_stats else "")
     if skipped:
         head += f"\n⚠️ {skipped} autre(s) série(s) non tracée(s) (8 couleurs, 4 unités) : précisez le mot"
     return png, (head + "\n" + "\n".join(legend))[:1000]

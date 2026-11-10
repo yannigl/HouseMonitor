@@ -667,3 +667,4 @@ Un mot qui n'est ni une période ni une grandeur connue (temperature, pression, 
 ou l'unité contient tous les mots sont tracées, un graphique par unité (4 au plus), une couleur par série (8 au plus). Ex. `/graph d tension` (toutes les prises, en V), `/graph w dioxyde` (CO₂ en ppm),
 `/graph d bruit`, `/graph m co2 living`. Alias français : tension, dioxyde, co2, bruit, puissance, énergie, luminosité, rosée… `/graph d tension debug` liste les entités retenues sans dessiner.
 Au-delà de 9 jours, la moyenne par jour des statistiques de HA ; la légende donne min, max et valeur actuelle de chaque série.
+Les thermostats (entités `climate.*`) sont inclus quand le mot correspond (ex. `/graph w thermostat`) : la température mesurée (trait plein) et la consigne (pointillés) sont des attributs de l'entité, lus dans l'historique détaillé de HA (10 jours au plus).
