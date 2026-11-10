@@ -128,7 +128,7 @@ COMMANDS = [
     ("alerts", "Alertes du jour : entités surveillées, état, armement, dernière erreur (administrateurs)"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("zigbee", "Santé du réseau Zigbee : liens (LQI, RSSI), coupures, voisins — /zigbee [heures] (administrateurs)"),
-    ("graph", "Graphique température / pression / humidité / vent : /graph [d|w|m|y|wtd|mtd|ytd] [temperature|pression|humidity|vent]"),
+    ("graph", "Graphique température / pression / humidité / vent : /graph [d|w|m|y|wtd|mtd|ytd] [temperature|pression|humidity|vent|data|mot libre : tension, dioxyde…]"),
     ("play", "Joue la sonnerie Nokia sur le haut-parleur du Pi : /play [1 à 5 fois]"),
     ("heating", "Chauffage Netatmo : /heating on (normal) · /heating away (absent, plus bas)"),
     ("away", "Absent : tout armer + chauffage en position absent"),

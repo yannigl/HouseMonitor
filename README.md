@@ -661,3 +661,9 @@ Tolérances « stable » par défaut : 2 dB, 2 % (humidité…), 1 hPa.
 « Event Rain : 1mm à 01h21 » (`"event_only": ["event rain"]` dans `summary`) ; section « 📡 Data depuis le jj/mm (hier) » : trois lignes « cumul du cycle (+volume d'hier) » : routeur 4G (compteur du routeur), script, reste du Pi (le Pi garde ses relevés horaires dans `pi_counter.csv` : l'hier du Pi et du reste du Pi n'apparaît qu'après deux jours de relevés).
 `/data reset` enregistre aussi le cumul du routeur à cet instant (`router_base` dans le fichier du cycle) : le total du routeur repart de zéro avec les autres compteurs. Si les relevés du routeur sont plus récents que le cycle, la ligne le dit (« compteur lu depuis le … »).
 `python3 firstseen.py [mot]` donne la date de départ d'un compteur d'énergie (premières statistiques de HA).
+
+## `/graph <période> <mot>` : toutes les séries d'un mot
+Un mot qui n'est ni une période ni une grandeur connue (temperature, pression, humidity, vent, data) sert de recherche : toutes les séries numériques (capteurs avec unité) dont le nom, l'entity_id, l'appareil
+ou l'unité contient tous les mots sont tracées, un graphique par unité (4 au plus), une couleur par série (8 au plus). Ex. `/graph d tension` (toutes les prises, en V), `/graph w dioxyde` (CO₂ en ppm),
+`/graph d bruit`, `/graph m co2 living`. Alias français : tension, dioxyde, co2, bruit, puissance, énergie, luminosité, rosée… `/graph d tension debug` liste les entités retenues sans dessiner.
+Au-delà de 9 jours, la moyenne par jour des statistiques de HA ; la légende donne min, max et valeur actuelle de chaque série.

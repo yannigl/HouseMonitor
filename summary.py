@@ -322,7 +322,8 @@ def list_text(query=None):
 # Les noms HA sont le plus souvent en anglais : quelques mots français courants cherchent aussi leur équivalent anglais.
 ALIASES = {"humidite": "humidity", "pression": "pressure", "vent": "wind", "pluie": "rain", "batterie": "battery",
            "bruit": "noise", "rafale": "gust", "tension": "voltage", "puissance": "power", "energie": "energy",
-           "courant": "current", "mouvement": "motion", "luminosite": "illuminance", "camera": "camera"}
+           "courant": "current", "mouvement": "motion", "luminosite": "illuminance", "camera": "camera",
+           "dioxyde": "carbon dioxide", "co2": "carbon dioxide", "rosee": "dew"}
 
 
 def all_states_text(query=None):
@@ -1088,7 +1089,7 @@ METRIC_WORDS = {"temperature": "temperature", "temp": "temperature", "pression":
                 "humidity": "humidity", "humidite": "humidity", "vent": "wind", "wind": "wind",
                 "data": "data", "debit": "data", "reseau": "data", "modem": "data"}
 GRAPH_USAGE = ("📈 /graph <période> [grandeur]\n• période : d (24 h, comme dans le résumé), w (7 j), m (30 j), y (12 mois), wtd / mtd / ytd (depuis lundi / le début du mois / de "
-               "l'année)\n• grandeur : temperature, pression, humidity, vent ou data (débit du modem, avec les totaux ; une seule ; sans mot, les quatre premières)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature · /graph w vent · /graph d data")
+               "l'année)\n• mot libre : tension, dioxyde, bruit, salon… (toutes les séries dont le nom contient le mot, un graphique par unité)\n• grandeur : temperature, pression, humidity, vent ou data (débit du modem, avec les totaux ; une seule ; sans mot, les quatre premières)\nEx. /graph d · /graph w · /graph mtd pression · /graph d temperature · /graph w vent · /graph d data · /graph d tension · /graph w dioxyde")
 
 
 def stats_points(rows, max_gap=timedelta(days=1.6)):
@@ -1107,11 +1108,77 @@ def stats_points(rows, max_gap=timedelta(days=1.6)):
     return mean, band
 
 
+def generic_graph(tokens, label, start, now, debug=False):
+    """/graph <période> <mot> : toutes les séries numériques (capteurs avec unité) dont le nom, l'entity_id, l'appareil ou l'unité contient tous les mots,
+    un graphique par unité (au plus 4), une couleur par série (8 au plus). -> (png, légende) ou message."""
+    import chart
+    sts = states()
+    try:
+        dmap = devices_map()
+    except Exception:
+        dmap = {}
+    found = []
+    for eid, (name, unit) in discover(sts).items():
+        if not eid.startswith("sensor."):
+            continue
+        blob = norm(" ".join(x for x in (eid, name, (dmap.get(eid) or {}).get("n"), (dmap.get(eid) or {}).get("o")) if x))
+        if all(t in blob or ALIASES.get(t, t) in blob or t == norm(unit) for t in tokens):
+            found.append((eid, name, unit))
+    if not found:
+        return f"Aucune série numérique ne correspond à « {' '.join(tokens)} ».\n\n{GRAPH_USAGE}"
+    found.sort(key=lambda f: (f[2], f[1].lower()))
+    units = []
+    for _, _, u in found:
+        if u not in units:
+            units.append(u)
+    keep_units = units[:4]
+    shown = [f for f in found if f[2] in keep_units][:len(chart.PALETTE)]
+    skipped = len(found) - len(shown)
+    if debug:
+        return f"🔧 /graph {' '.join(tokens)} : {len(found)} série(s)\n" + "\n".join(f"• {e} [{u}] {n}" for e, n, u in found)
+    use_stats = (now - start) > timedelta(days=STATS_MIN_DAYS)
+    long_span = (now - start) > timedelta(days=1.5)
+    stats = {}
+    if use_stats:
+        try:
+            import hastats
+            stats = hastats.statistics(HA, CFG["ha_token"], [e for e, _, _ in shown], start.astimezone(), now.astimezone(), "day")
+        except Exception as e:
+            print(f"statistiques de HA illisibles : {type(e).__name__}: {e}", file=sys.stderr)
+    hist = {} if stats and all(stats.get(e) for e, _, _ in shown) else history([e for e, _, _ in shown], start.astimezone(), None)
+    panels = {u: {"unit": u, "series": [], "ref": None, "clamp": None} for u in keep_units}
+    legend = []
+    for i, (eid, name, unit) in enumerate(shown):
+        emoji, rgb = chart.PALETTE[i]
+        if stats.get(eid):
+            pts = stats_points(stats[eid])[0]
+        else:
+            series, _ = to_celsius(hist.get(eid, []), unit)
+            pts = chart_points(series, start, now, 700 if long_span else None)
+        vals = [v for _, v in pts if v is not None]
+        if not vals:
+            continue
+        panels[unit]["series"].append((rgb, pts, False, False))
+        legend.append(f"{emoji} {name} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
+    panels = [p for p in panels.values() if p["series"]]
+    if not panels:
+        return f"Aucune mesure pour « {' '.join(tokens)} » dans l'historique de HA sur cette période."
+    try:
+        png = chart.render(panels, start, now)
+    except Exception as e:
+        print(f"graphique impossible : {type(e).__name__}: {e}", file=sys.stderr)
+        return "Graphique impossible (voir le journal du listener)."
+    head = f"📈 {label} — « {' '.join(tokens)} » : {len(legend)} série(s)"
+    if skipped:
+        head += f"\n⚠️ {skipped} autre(s) série(s) non tracée(s) (8 couleurs, 4 unités) : précisez le mot"
+    return png, (head + "\n" + "\n".join(legend))[:1000]
+
+
 def graph_report(args, debug=False):
     """/graph : -> (png, légende) ou un message d'erreur (str). Jusqu'à 9 jours : tous les relevés de HA. Au-delà (m, y, mtd, ytd tard dans le mois) :
     les statistiques à long terme de HA (moyenne, minimum et maximum par jour, via WebSocket), avec une zone min-max translucide pour les températures ;
     si elles sont indisponibles, l'historique détaillé (10 jours au plus)."""
-    period, metrics = "d", []
+    period, metrics, free = "d", [], []
     for a in args:
         w = norm(a)
         if w == "debug":
@@ -1121,7 +1188,11 @@ def graph_report(args, debug=False):
         elif w in METRIC_WORDS:
             metrics.append(METRIC_WORDS[w])
         else:
-            return f"Mot inconnu : « {a} ».\n\n{GRAPH_USAGE}"
+            free.append(w)
+    if free:  # mot libre (tension, dioxyde, salon…) : toutes les séries dont le nom contient ce mot, un graphique par unité
+        label, begin = PERIODS[period]
+        now = datetime.now()
+        return generic_graph(free + [norm(a) for a in args if norm(a) in METRIC_WORDS], label, min(begin(now), now - timedelta(hours=2)), now, debug)
     metrics = metrics or ["temperature", "pressure", "humidity", "wind"]
     label, begin = PERIODS[period]
     now = datetime.now()
