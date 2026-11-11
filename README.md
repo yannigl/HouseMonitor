@@ -668,3 +668,6 @@ ou l'unité contient tous les mots sont tracées, un graphique par unité (4 au 
 `/graph d bruit`, `/graph m co2 living`. Alias français : tension, dioxyde, co2, bruit, puissance, énergie, luminosité, rosée… `/graph d tension debug` liste les entités retenues sans dessiner.
 Au-delà de 9 jours, la moyenne par jour des statistiques de HA ; la légende donne min, max et valeur actuelle de chaque série.
 Les thermostats (entités `climate.*`) sont inclus quand le mot correspond (ex. `/graph w thermostat`) : la température mesurée (trait plein) et la consigne (pointillés) sont des attributs de l'entité, lus dans l'historique détaillé de HA (10 jours au plus).
+
+**Thermostat dans le graphique des températures** : la température mesurée du thermostat Netatmo (entité `climate.*`) est tracée comme un capteur, avec sa consigne en pointillés de la même couleur (légende « Netatmo Thermostat (consigne en pointillés) »),
+dans le résumé du matin et dans `/graph … temperature`. Ce sont des attributs de l'entité, lus dans l'historique détaillé de HA (10 jours au plus). `"chart_thermostats": false` (dans `summary`) les retire.

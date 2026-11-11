@@ -1005,15 +1005,39 @@ def sensor_key(label, dev, labels):
     return label
 
 
+CHART_CLIMATE = _SUM.get("chart_thermostats", True)  # thermostats (climate.*) : mesure et consigne dans le graphique des températures
+
+
+def climate_series(sts, start, end, max_points=None):
+    """Thermostats : [(entity_id, nom, points de la température mesurée, points de la consigne)] entre `start` et `end` (datetimes locaux sans fuseau).
+    La mesure et la consigne sont des attributs de l'entité climate : historique complet de HA (avec attributs), 10 jours au plus."""
+    names = {s["entity_id"]: (s.get("attributes") or {}).get("friendly_name", s["entity_id"]) for s in sts if s["entity_id"].startswith("climate.")}
+    if not names:
+        return []
+    full = http(f"{HA}/api/history/period/{start.astimezone().isoformat()}?" + urllib.parse.urlencode(
+        {"filter_entity_id": ",".join(names), "end_time": end.astimezone().isoformat(), "significant_changes_only": "0"}), AUTH)
+    rows = {lst[0]["entity_id"]: lst for lst in full if lst}
+    out = []
+    for eid, name in names.items():
+        pts = {}
+        for attr in ("current_temperature", "temperature"):
+            fake = [{"state": str(r["attributes"][attr]), "last_changed": r.get("last_updated") or r["last_changed"]}
+                    for r in rows.get(eid, []) if isinstance(r.get("attributes"), dict) and isinstance(r["attributes"].get(attr), (int, float))]
+            pts[attr] = chart_points(fake, start, end, max_points)
+        if pts["current_temperature"] or pts["temperature"]:
+            out.append((eid, name, pts["current_temperature"], pts["temperature"]))
+    return out
+
+
 def attach_chart(text, chart_data, start=None, end=None):
     """Dessine les graphiques (un par grandeur, les uns sous les autres) et prépare la légende : une pastille = un capteur, de la même couleur
     sur les trois graphiques. En cas d'échec du dessin, les valeurs passent dans le texte. -> (texte, png ou None, légende)."""
     import chart  # import tardif : le dessin n'est utile qu'ici
     now = end or datetime.now()
     start = start or now - timedelta(hours=HOURS)
-    labels = {d[0] for m, data in chart_data.items() if m not in ("dew", "wind", "data") for d in data}
+    labels = {d[0] for m, data in chart_data.items() if m not in ("dew", "wind", "data", "setpoint") for d in data}
     keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2], d[4] if len(d) > 4 else None) for d in data]
-             for m, data in chart_data.items() if m not in ("dew", "wind", "data")}
+             for m, data in chart_data.items() if m not in ("dew", "wind", "data", "setpoint")}
     notes = {}  # capteur -> plage du point de rosée qu'il expose
     for entry in chart_data.get("dew", []):
         label, pts, _, dev = entry[:4]
@@ -1038,6 +1062,8 @@ def attach_chart(text, chart_data, start=None, end=None):
             style = next((st for st in CHART_STYLES if st["match"] in norm(src)), {})
             styles[src] = style
             series.append((color[src][1], pts, style.get("bold", False), style.get("dashed", False), band if metric in CHART_BAND else None))
+            if metric == "temperature" and label in chart_data.get("setpoint", {}):  # consigne du thermostat : même couleur, pointillés
+                series.append((color[src][1], chart_data["setpoint"][label], False, True, None))
         panels.append({"unit": unit, "series": series, "ref": CHART_REF.get(metric), "clamp": (0, 100) if metric == "humidity" else None})
     wind = {}
     for role, pts, wunit, *_ in chart_data.get("wind", []):
@@ -1057,7 +1083,7 @@ def attach_chart(text, chart_data, start=None, end=None):
             fallback.append(f"• vent ({r}) : {min(vals):g} → {max(vals):g}, actuel {vals[-1]:g}")
     def hint(src):
         st = styles.get(src, {})
-        return " — trait épais" if st.get("bold") else " — pointillés" if st.get("dashed") else ""
+        return (" — trait épais" if st.get("bold") else " — pointillés" if st.get("dashed") else "") + (" (consigne en pointillés)" if src in chart_data.get("setpoint", {}) else "")
     legend = [f"{color[src][0]} {src}{hint(src)}" + (f" (rosée {notes[src]})" if src in notes else "") for src in sources if src in color]
     legend += [f"• {src}" for src in sources if src not in color]  # sans couleur : plus de 8 capteurs
     data_legend = []
@@ -1293,6 +1319,15 @@ def graph_report(args, debug=False):
                 data[metric].append((chart_label(name, metric, unit), pts, unit if metric == "wind" else "", dev))
     if debug:
         return "\n".join(report)
+    if "temperature" in metrics and CHART_CLIMATE:
+        try:
+            for _, name, mes, cons in climate_series(sts, start, now, 700 if long_span else None):
+                if mes:
+                    data["temperature"].append((name, mes, "", name))
+                if cons:
+                    data.setdefault("setpoint", {})[name] = cons
+        except Exception as e:
+            print(f"thermostat hors graphique : {type(e).__name__}: {e}", file=sys.stderr)
     if not any(data[m] for m in metrics):
         return f"Aucune mesure ({', '.join(metrics)}) dans l'historique de HA sur cette période."
     _, png, caption = attach_chart("", data, start, now)
@@ -1516,6 +1551,16 @@ def build_report(with_chart=True):
         text += (f"\n\n⚠️ {len(skipped)} entité{'s' if len(skipped) > 1 else ''} ignorée"
                  f"{'s' if len(skipped) > 1 else ''} (données illisibles, détail dans run.log) : {shown}")
     png, caption = None, ""
+    if chart_data is not None and "temperature" in chart_data and CHART_CLIMATE:
+        try:
+            now_local = datetime.now()
+            for _, name, mes, cons in climate_series(sts, now_local - timedelta(hours=HOURS), now_local):
+                if mes:
+                    chart_data["temperature"].append((name, mes, "", name))
+                if cons:
+                    chart_data.setdefault("setpoint", {})[name] = cons
+        except Exception as e:  # le thermostat est un plus : jamais d'échec du résumé
+            print(f"thermostat hors graphique : {type(e).__name__}: {e}", file=sys.stderr)
     if chart_data and any(chart_data[m] for m in CHART_METRICS):
         text, png, caption = attach_chart(text, chart_data)
     return text + power_text(), png, caption
