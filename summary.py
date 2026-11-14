@@ -8,6 +8,7 @@ Découvre toutes les entités via /api/states, puis résume selon le type :
   input_boolean     -> nombre de cycles (on -> off) + heures de départ
 """
 import json
+import math
 import os
 import re
 import subprocess
@@ -931,6 +932,78 @@ def wind_role(name, unit):
     return None
 
 
+RAIN_CHART = _SUM.get("rain_chart", True)  # s'il a plu sur la fenêtre : graphique de pluie sous les autres et une seule ligne de texte
+# compteurs cumulés qui servent à calculer la pluie tombée sur la fenêtre, du plus fiable au moins fiable (le premier qui a des relevés)
+RAIN_COUNTERS = [norm(x) for x in _SUM.get("rain_counters", ["total rain", "yearly rain", "monthly rain", "weekly rain", "daily rain"])]
+RAIN_UNITS = ("mm", "cm", "in", "mm/h", "cm/h", "in/h")
+RAIN_COLORS = {"cum": (38, 139, 210), "rate": (245, 135, 0)}
+RAIN_NAMES = {"cum": ("🔵", "Pluie cumulée"), "rate": ("🟠", "Intensité — axe de droite")}
+
+
+def is_rain_sensor(name, unit):
+    return unit in RAIN_UNITS and re.search(r"\brain\b", norm(name)) is not None
+
+
+def rain_cumulative(series, start, end):
+    """Pluie tombée depuis `start` d'après un compteur cumulé : [(heure, cumul)] de 0 à la fin de la fenêtre. Seules les hausses comptent :
+    une baisse (remise à zéro du compteur à minuit ou le 1er du mois) repart de la nouvelle valeur sans rien retirer ni ajouter. Courbe en paliers."""
+    pts, total, prev = [(start, 0.0)], 0.0, None
+    for st in series:
+        try:
+            t, v = ts(st).replace(tzinfo=None), float(st["state"])
+        except (ValueError, KeyError, TypeError):
+            continue  # unavailable / unknown
+        rose = prev is not None and v > prev
+        if rose:
+            total += v - prev
+        prev = v
+        if t >= start:
+            if rose:  # HA n'enregistre que les changements : palier jusqu'à la hausse, pas de diagonale à travers les heures sèches
+                pts.append((t, pts[-1][1]))
+            pts.append((t, round(total, 3)))
+    pts.append((end, round(total, 3)))
+    return pts, round(total, 3)
+
+
+def rain_report(ents, hist, dmap, skip_devs, start, end):
+    """Pluie de la fenêtre, ou None s'il n'a pas plu (le résumé reste alors comme avant).
+    -> {"ids": capteurs de pluie (retirés du texte), "dev": appareil, "cum": courbe, "unit", "rate": courbe, "rate_unit", "total", "peak", "month"}."""
+    rain = {eid: (n, u) for eid, (n, u) in ents.items() if eid.startswith("sensor.") and is_rain_sensor(n, u)
+            and (dmap.get(eid) or {}).get("d") not in skip_devs}
+    if not rain:
+        return None
+    out = {"ids": set(rain), "cum": None, "rate": None, "peak": None, "month": None, "total": 0.0, "unit": "mm", "rate_unit": "mm/h"}
+    for word in RAIN_COUNTERS:
+        eid = next((e for e, (n, u) in sorted(rain.items()) if word in norm(n) and not u.endswith("/h") and floats(hist.get(e, []))), None)
+        if eid:
+            out["cum"], out["total"] = rain_cumulative(hist[eid], start, end)
+            out["unit"], out["dev"] = rain[eid][1], (dmap.get(eid) or {}).get("n")
+            break
+    rate = next((e for e, (n, u) in sorted(rain.items()) if "rain rate" in norm(n) and u.endswith("/h") and floats(hist.get(e, []))), None)
+    if rate:
+        pts = chart_points(hist[rate], start, end)
+        out["rate"], out["rate_unit"] = pts, rain[rate][1]
+        top = max(pts[:-1] or pts, key=lambda p: p[1])
+        out["peak"] = top if top[1] > 0 else None
+        out.setdefault("dev", (dmap.get(rate) or {}).get("n"))
+    month = next((e for e, (n, u) in sorted(rain.items()) if "monthly rain" in norm(n) and not u.endswith("/h") and floats(hist.get(e, []))), None)
+    if month:
+        out["month"] = (floats(hist[month])[-1], rain[month][1])
+    if out["total"] <= 0 and not out["peak"]:
+        return None  # pas une goutte sur la fenêtre
+    return out
+
+
+def rain_line(rain):
+    """La seule ligne de pluie du résumé : cumul de la fenêtre, pic d'intensité et heure, total du mois."""
+    line = f"Pluie : {round(rain['total'], 2):g}{rain['unit']} sur {HOURS} h" if rain["cum"] else f"Pluie sur {HOURS} h"
+    if rain["peak"]:
+        line += f" · pic {round(rain['peak'][1], 2):g}{rain['rate_unit']} à {hm(rain['peak'][0])}"
+    if rain["month"]:
+        line += f" · mois {round(rain['month'][0], 2):g}{rain['month'][1]}"
+    return line
+
+
 def is_temperature(name, unit):
     low = norm(name)
     return unit in ("°C", "°F") and "temperature" in low and not any(w in low for w in NOT_TEMPERATURE)
@@ -1035,9 +1108,9 @@ def attach_chart(text, chart_data, start=None, end=None):
     import chart  # import tardif : le dessin n'est utile qu'ici
     now = end or datetime.now()
     start = start or now - timedelta(hours=HOURS)
-    labels = {d[0] for m, data in chart_data.items() if m not in ("dew", "wind", "data", "setpoint") for d in data}
+    labels = {d[0] for m, data in chart_data.items() if m not in ("dew", "wind", "data", "setpoint", "rain") for d in data}
     keyed = {m: [(sensor_key(d[0], d[3], labels), d[0], d[1], d[2], d[4] if len(d) > 4 else None) for d in data]
-             for m, data in chart_data.items() if m not in ("dew", "wind", "data", "setpoint")}
+             for m, data in chart_data.items() if m not in ("dew", "wind", "data", "setpoint", "rain")}
     notes = {}  # capteur -> plage du point de rosée qu'il expose
     for entry in chart_data.get("dew", []):
         label, pts, _, dev = entry[:4]
@@ -1099,7 +1172,26 @@ def attach_chart(text, chart_data, start=None, end=None):
                 vals = [v for _, v in flows[r][0] if v is not None]
                 data_legend.append(f"{DATA_NAMES[r]} — total au moins {fmt_bytes(flows[r][2])}, pic {max(vals):g} {flows[r][1]}")
                 fallback.append(f"• {r} : {min(vals):g} → {max(vals):g} {flows[r][1]}, total au moins {fmt_bytes(flows[r][2])}")
-    caption = "\n".join(legend + wind_legend + data_legend)[:1000]
+    rain_legend = []
+    rain = chart_data.get("rain")
+    if rain and (rain["cum"] or rain["rate"]):
+        rate = rain["rate"]
+        if rain["cum"]:
+            panel = {"unit": rain["unit"], "ref": None, "clamp": None, "floor": 0, "series": [(RAIN_COLORS["cum"], rain["cum"], True, False)]}
+            rain_legend.append(f"{RAIN_NAMES['cum'][0]} {RAIN_NAMES['cum'][1]} — {round(rain['total'], 2):g} {rain['unit']}")
+            if rate:  # intensité sur l'axe de droite, de 0 à un pas rond au-dessus du pic
+                top = max(v for _, v in rate if v is not None)
+                step = chart.nice_step(max(top, 2.0), 4)
+                panel["right"] = {"unit": rain["rate_unit"], "color": RAIN_COLORS["rate"], "range": (0, math.ceil(top / step - 1e-9) * step),
+                                  "step": step, "points": rate, "line": True}
+        else:  # pas de compteur cumulé : l'intensité seule, sur l'axe de gauche
+            panel = {"unit": rain["rate_unit"], "ref": None, "clamp": None, "floor": 0, "series": [(RAIN_COLORS["rate"], rate, False, False)]}
+        if rate:
+            peak = f", pic {round(rain['peak'][1], 2):g} {rain['rate_unit']} à {hm(rain['peak'][0])}" if rain["peak"] else ""
+            rain_legend.append(f"{RAIN_NAMES['rate'][0]} {RAIN_NAMES['rate'][1]}{peak}")
+        panels.append(panel)
+        fallback.append(f"• pluie : {round(rain['total'], 2):g} {rain['unit']} sur la fenêtre")
+    caption = "\n".join(legend + wind_legend + data_legend + rain_legend)[:1000]
     try:
         return text, chart.render(panels, start, now), caption
     except Exception as e:
@@ -1376,6 +1468,13 @@ def build_report(with_chart=True):
     det_devs = {dmap[e]["d"] for e, (n, _) in ents.items() if (dmap.get(e) or {}).get("d") and is_detector(e, n, armed)}
     vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
     silent_ids = {r[3] for r in silent_rows}
+    rain = None  # s'il a plu sur la fenêtre : un graphique de pluie sous les autres, une seule ligne dans le texte ; sinon rien ne change
+    if with_chart and RAIN_CHART:
+        try:
+            now_local = datetime.now()
+            rain = rain_report(ents, hist, dmap, silent_ids, now_local - timedelta(hours=HOURS), now_local)
+        except Exception as e:  # la pluie est un plus : jamais d'échec du résumé
+            print(f"pluie hors graphique : {type(e).__name__}: {e}", file=sys.stderr)
     chart_data = {m: [] for m in [*CHART_METRICS, "dew"]} if with_chart else None  # grandeur -> [(libellé, [(heure, valeur)], note)]
     groups = defaultdict(list)  # appareil -> ses lignes
     det_groups = defaultdict(list)  # appareil de détection -> ses lignes
@@ -1406,6 +1505,8 @@ def build_report(with_chart=True):
     for eid, (name, unit) in sorted(ents.items(), key=lambda kv: kv[1][0]):
         if eid in absorbed:
             continue
+        if rain and eid in rain["ids"]:
+            continue  # dessiné dans le graphique de pluie, résumé par une seule ligne
         if (dmap.get(eid) or {}).get("d") in silent_ids:
             continue
         if chart_data is not None and eid.startswith("sensor."):  # température, pression, humidité : dans les graphiques, pas dans le texte
@@ -1525,6 +1626,11 @@ def build_report(with_chart=True):
                 put(groups[dname], "  • " + line, order)
             else:
                 put(sections["📈 Capteurs"], "• " + line, order)
+    if rain:
+        if rain.get("dev"):
+            put(groups[rain["dev"]], "  • " + rain_line(rain), order_key("monthly rain"))
+        else:
+            put(sections["📈 Capteurs"], "• " + rain_line(rain), order_key("monthly rain"))
     for l in dev_lines:
         put(sections["🔌 Switches / lumières"], "• " + l)
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
@@ -1561,7 +1667,9 @@ def build_report(with_chart=True):
                     chart_data.setdefault("setpoint", {})[name] = cons
         except Exception as e:  # le thermostat est un plus : jamais d'échec du résumé
             print(f"thermostat hors graphique : {type(e).__name__}: {e}", file=sys.stderr)
-    if chart_data and any(chart_data[m] for m in CHART_METRICS):
+    if rain and chart_data is not None:
+        chart_data["rain"] = rain
+    if chart_data and (any(chart_data[m] for m in CHART_METRICS) or chart_data.get("rain")):
         text, png, caption = attach_chart(text, chart_data)
     return text + power_text(), png, caption
 

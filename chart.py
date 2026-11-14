@@ -183,15 +183,22 @@ WIDTH_NORMAL, WIDTH_BOLD, DASH = 2.2, 4.8, (11, 7)
 
 
 def draw_right_axis(c, panel, px, y0, y1, x1):
-    """Second axe (à droite) : graduations et points d'une série, ex. la direction du vent de 0 à 360°."""
+    """Second axe (à droite) : graduations et série, ex. la direction du vent de 0 à 360° (points) ou l'intensité de la pluie (courbe, `"line": True`).
+    `step` : écart des graduations (90 par défaut)."""
     r = panel["right"]
     lo, hi = r["range"]
     py = lambda v: y1 - (v - lo) / (hi - lo) * (y1 - y0)
-    for v in range(int(lo), int(hi) + 1, 90):
+    v = lo
+    while v <= hi + 1e-9:
         y = int(py(v))
         c.rect(x1, y, x1 + 4, y, r["color"])
-        c.text(x1 + 8, y - 7, f"{v}", color=r["color"])
+        c.text(x1 + 8, y - 7, f"{round(v, 6):g}", color=r["color"])
+        v += r.get("step", 90)
     c.text(x1 + 8, y0 - 18, r["unit"], color=r["color"], scale=2)
+    if r.get("line"):
+        for run in runs(r["points"], lambda v: v is None):
+            c.polyline([(px(t), py(max(lo, min(hi, v)))) for t, v in run], r["color"], WIDTH_NORMAL)
+        return
     for t, v in r["points"]:
         if v is not None:
             x, y = int(px(t)), int(py(v))

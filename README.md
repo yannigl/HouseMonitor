@@ -109,6 +109,11 @@ intérieures, pressions absolue et relative) sont deux capteurs, donc deux coule
   rappelé dans la légende (`🟠 Weather Station Outdoor — trait épais`, `🔵 Thermomètre Grenier2 — pointillés`). Aucun autre capteur n'est en pointillés.
 - `"chart_metrics": ["temperature", "pressure", "humidity", "wind"]` (défaut) : grandeurs dessinées (« wind » : vitesse en courbe, rafales en nuage de points, rafale max du jour en pointillés (seulement dans /graph ; le résumé la garde en texte), direction en points sur l'axe de droite, 0–360°) ; celles qui ne sont pas listées restent en lignes de texte.
   `"temperature_chart": false` supprime les graphiques.
+- **Pluie** : s'il a plu sur les dernières 24 h, un **graphique « pluie »** s'ajoute **sous les autres** et les capteurs de pluie (Monthly Rain, Event Rain…) disparaissent du texte au profit d'**une seule ligne**
+  (`Pluie : 8.25mm sur 24 h · pic 7mm/h à 23h00 · mois 18.25mm`, sous la station météo). Courbe bleue = pluie **cumulée** depuis le début de la fenêtre (axe de gauche, en paliers, calculée
+  d'après le premier compteur disponible de `"rain_counters": ["total rain", "yearly rain", "monthly rain", "weekly rain", "daily rain"]`, dont seules les hausses comptent : une remise à zéro à minuit ou en début de mois
+  n'est pas comptée) ; courbe orange = **intensité** « Rain Rate » (axe de droite). Il n'a pas plu (cumul nul et intensité nulle) : rien ne change, `Monthly Rain : 10.4mm (daily 1.5mm hier)` reste comme avant.
+  `"rain_chart": false` désactive ce comportement. Résumé du matin et `/update` seulement : `/graph` ne le fait pas (`/graph d pluie` dessine les séries de pluie à la demande).
 - L'image est dessinée par `chart.py` en bibliothèque standard (pas de matplotlib) et envoyée par `/update` au chat d'où la commande est partie. Si le dessin échoue, les valeurs
   passent dans le texte. `python3 summary.py --dry` écrit l'image dans `temperatures.png`.
 
