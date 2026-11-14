@@ -666,7 +666,13 @@ La ligne du routeur ne donne que le volume d'hier (le jour précédent complet) 
 **Résumé plus court** : la ligne « ⚡ Alimentation du Pi » n'apparaît que s'il y a eu une alerte de sous-tension (ou une sous-tension / un bridage du CPU en ce moment). Une mesure presque constante s'écrit « Noise : 36dB (stable) » :
 `"stable_tolerance": {"dB": 2}` (dans `summary`, défaut) donne l'écart max-min toléré par unité ; ajoutez par exemple `"%": 1` ou `"hPa": 1` pour d'autres grandeurs.
 Un redémarrage du Pi dans les dernières 24 h ajoute « ⏻ Pi redémarré à hh:mm (il y a N h) » au résumé (d'après /proc/uptime : seul un redémarrage du Pi compte, pas celui du listener).
-Tolérances « stable » par défaut : 2 dB, 2 % (humidité…), 1 hPa.
+Tolérances « stable » par défaut : 2 dB, 2 % (humidité…), 1 hPa, 200 ppm (CO2). Une tolérance de `stable_tolerance` s'ajoute à ces défauts, elle ne les remplace pas.
+
+**CO2 lissé** : un capteur de CO2 Netatmo peut sauter de ±100 ppm d'un relevé à l'autre sans que l'air change (le salon de l'exemple : écart-type 103 ppm, contre 13 ppm dans la chambre, même modèle). Les capteurs dont le nom contient
+« carbon dioxide » sont donc remplacés par leur **moyenne glissante sur 120 minutes** (chaque relevé = la moyenne des relevés des 2 h précédentes) : dans le résumé du matin (« Living Room Carbon dioxide (moy. 120 min) : 508ppm (stable) »,
+minimum, maximum et valeur actuelle sont ceux de la courbe lissée) et dans `/graph d dioxyde`, dont la légende le précise. `/export`, `/update all` et `/state` gardent les relevés bruts.
+`"summary": {"smooth": [{"match": "carbon dioxide", "minutes": 120}]}` règle la durée (60 min laisse des ondulations de ±40 ppm sur le salon), `"smooth": []` désactive le lissage ; `match` peut viser un autre capteur bruité.
+Un jour calme (écart max-min lissé de 200 ppm au plus) s'écrit « (stable) » ; au-delà, minimum, maximum et heures s'affichent.
 
 **Résumé, mise en forme** : silences de plus de 24 h réduits à « nom - N j » (nom sans le préfixe avant le dernier « - ») ; prises « on / off (N↻ heures) · 0,37 kWh (+0,02/j) » (↻ = cycles, soit les passages à « on ») (compteur cumulé de la prise, puis ce qui s'y est ajouté par jour) ;
 « Event Rain : 1mm à 01h21 » (`"event_only": ["event rain"]` dans `summary`) ; section « 📡 Data depuis le jj/mm (hier) » : trois lignes « cumul du cycle (+volume d'hier) » : routeur 4G (compteur du routeur), script, reste du Pi (le Pi garde ses relevés horaires dans `pi_counter.csv` : l'hier du Pi et du reste du Pi n'apparaît qu'après deux jours de relevés).

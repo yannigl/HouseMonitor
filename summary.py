@@ -399,7 +399,61 @@ def history(entity_ids, start=None, end=None):
 
 # Écart max-min (dans l'unité du capteur) en dessous duquel une mesure est dite stable : « Noise : 36dB (stable) » plutôt que la plage et les heures.
 EVENT_ONLY = [norm(x) for x in _SUM.get("event_only", ["event rain"])]  # « Event Rain : 1mm à 01h21 » : l'événement et son heure, sans le point de départ à 0
-STABLE_TOL = {k.lower(): v for k, v in _SUM.get("stable_tolerance", {"dB": 2, "%": 2, "hPa": 1}).items()}
+STABLE_TOL = {k.lower(): v for k, v in {"dB": 2, "%": 2, "hPa": 1, "ppm": 200, **_SUM.get("stable_tolerance", {})}.items()}  # la config complète ces défauts, elle ne les remplace pas
+# Moyenne glissante des capteurs trop bruités (CO2 Netatmo : ±100 ppm d'un relevé à l'autre) : chaque relevé devient la moyenne des `minutes` dernières minutes,
+# dans le résumé (minimum, maximum, actuel, « stable ») comme dans /graph. `/export` garde les relevés bruts. `"smooth": []` désactive.
+SMOOTH = [{"match": norm(m["match"]), "minutes": m.get("minutes", 120)} for m in _SUM.get("smooth", [{"match": "carbon dioxide", "minutes": 120}])]
+
+
+def smooth_minutes(name):
+    """Durée (minutes) de la moyenne glissante du capteur, 0 s'il n'est pas lissé."""
+    low = norm(name)
+    return next((m["minutes"] for m in SMOOTH if m["match"] in low and m["minutes"] > 0), 0)
+
+
+def smooth_series(series, minutes, start=None):
+    """Moyenne glissante d'une série d'états HA : chaque relevé numérique devient la moyenne des relevés des `minutes` dernières minutes (lui compris).
+    Un état non numérique (unavailable) reste tel quel et coupe la courbe. `start` (datetime avec fuseau) : les relevés d'avant ne servent qu'à remplir
+    la première fenêtre, sauf le dernier, gardé comme valeur de départ."""
+    span, window, out = timedelta(minutes=minutes), [], []
+    vals = floats(series)
+    whole = all(v.is_integer() for v in vals)  # des ppm entiers restent entiers
+    for st in series:
+        try:
+            t = ts(st)
+        except (ValueError, KeyError, TypeError):
+            continue
+        try:
+            v = float(st["state"])
+        except (ValueError, KeyError, TypeError):
+            out.append((t, st))
+            continue
+        window = [(tt, vv) for tt, vv in window if tt > t - span] + [(t, v)]
+        mean = sum(vv for _, vv in window) / len(window)
+        out.append((t, dict(st, state=str(round(mean) if whole else round(mean, 2)))))
+    if start is not None:
+        before = [x for x in out if x[0] < start]
+        out = before[-1:] + [x for x in out if x[0] >= start]
+    return [st for _, st in out]
+
+
+def smooth_hist(hist, names, start=None, end=None):
+    """Remplace dans `hist` les séries des capteurs à lisser par leur moyenne glissante. `names` : {entity_id: nom}. Une durée de plus est lue avant `start`
+    pour que la première moyenne soit pleine."""
+    todo = {e: smooth_minutes(n) for e, n in names.items() if e in hist}
+    todo = {e: m for e, m in todo.items() if m}
+    if not todo:
+        return hist
+    start = start or datetime.now(timezone.utc) - timedelta(hours=HOURS)
+    try:
+        wide = history(list(todo), start - timedelta(minutes=max(todo.values())), end)
+    except Exception as e:  # sans les relevés d'avant, la première moyenne est seulement moins pleine
+        print(f"lissage : relevés d'avant la fenêtre illisibles : {type(e).__name__}: {e}", file=sys.stderr)
+        wide = {}
+    out = dict(hist)
+    for eid, minutes in todo.items():
+        out[eid] = smooth_series(wide.get(eid) or hist[eid], minutes, start)
+    return out
 
 
 def numeric_line(name, unit, states):
@@ -1280,6 +1334,8 @@ def generic_graph(tokens, label, start, now, debug=False):
         except Exception as e:
             print(f"statistiques de HA illisibles : {type(e).__name__}: {e}", file=sys.stderr)
     hist = {} if (not shown or (stats and all(stats.get(e) for e, _, _ in shown))) else history([e for e, _, _ in shown], start.astimezone(), None)
+    if hist:
+        hist = smooth_hist(hist, {e: n for e, n, _ in shown}, start.astimezone())
     panels = {u: {"unit": u, "series": [], "ref": None, "clamp": None} for u in keep_units}
     if climates and "°C" not in panels:
         panels["°C"] = {"unit": "°C", "series": [], "ref": None, "clamp": None}
@@ -1295,7 +1351,8 @@ def generic_graph(tokens, label, start, now, debug=False):
         if not vals:
             continue
         panels[unit]["series"].append((rgb, pts, False, False))
-        legend.append(f"{emoji} {name} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}")
+        sm = 0 if stats.get(eid) else smooth_minutes(name)  # les statistiques de HA sont déjà des moyennes par jour
+        legend.append(f"{emoji} {name} : {min(vals):g} → {max(vals):g} {unit}, actuel {vals[-1]:g}" + (f" (moyenne glissante {sm} min)" if sm else ""))
     if climates:  # l'historique complet (avec attributs) : seulement pour les thermostats ; 10 jours au plus (pas de statistiques à long terme pour des attributs)
         full = http(f"{HA}/api/history/period/{start.astimezone().isoformat()}?" + urllib.parse.urlencode(
             {"filter_entity_id": ",".join(e for e, _ in climates), "end_time": datetime.now(timezone.utc).isoformat(), "significant_changes_only": "0"}), AUTH)
@@ -1450,6 +1507,7 @@ def build_report(with_chart=True):
         if eid in cur and eid not in ents and not is_ghost(cur[eid]):
             ents[eid] = (cur[eid].get("attributes", {}).get("friendly_name", eid), "")
     hist = history(list(ents))
+    hist = smooth_hist(hist, {e: n for e, (n, _) in ents.items() if e.startswith("sensor.")})  # CO2 : moyenne glissante
     with_chart = with_chart and CHART
     sections = defaultdict(list)
     skipped = []
@@ -1536,6 +1594,9 @@ def build_report(with_chart=True):
         label = name  # sous un appareil, son nom est retiré du libellé de l'entité
         if dname and name.lower().startswith(dname.lower()):
             label = name[len(dname):].strip(" -:") or name
+        sm = smooth_minutes(name) if eid.startswith("sensor.") else 0
+        if sm:
+            label = f"{label} (moy. {sm} min)"
         detector = is_detector(eid, name, armed) or dev in det_devs
         if dom == "sensor":
             series, unit = to_celsius(series, unit)
