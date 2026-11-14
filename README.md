@@ -68,6 +68,7 @@ les 30 s) : le bot ne répond plus et plus aucun ping n'est envoyé.
 | `/update` | Le résumé du matin, tout de suite |
 | `/update all` | État actuel de **toutes** les entités, **regroupées par appareil** (les capteurs d'une prise sous son interrupteur), avec l'heure du dernier changement |
 | `/on <nom>` · `/off <nom>` | Allume / éteint l'interrupteur d'un appareil (voir *Piloter un interrupteur*) |
+| `/export [heures] <mot>` | Relevés bruts des capteurs qui contiennent le mot, en pièce jointe CSV (voir *Exporter l'historique brut*) |
 | `/stale [heures]` | Entités **sans nouvelle depuis N h** (24 par défaut), avec leur âge : le moyen de repérer les appareils d'une ancienne installation |
 
 `/list` et `/update all` n'affichent ni les entités **désactivées** dans Home Assistant (entité ou intégration : elles
@@ -620,8 +621,13 @@ Sans le compteur, la ligne « Pi au total » indique « non mesuré » ; le rest
 - Le `git pull` du matin est mesuré avec ce compteur quand il est installé (plus de trafic local mélangé).
 
 ## Exporter l'historique brut d'un capteur (CSV)
-`python3 exportdata.py [heures] [mot ...]` écrit `export_<heures>h.csv` (tous les relevés de HA : heure, entité, nom, valeur, unité) pour les capteurs dont le nom contient un des mots
-(défaut : `download upload`, sur 24 h) et affiche le rythme des relevés (intervalle médian, min, max). Ex. `python3 exportdata.py 48 wind`.
+**Depuis Telegram** (administrateurs) : `/export [durée] <mot> [mot …]` envoie en pièce jointe un CSV de **tous les relevés** de HA (heure locale, entité, nom, valeur, unité) des capteurs dont le nom,
+l'`entity_id` ou l'appareil contient **tous** les mots, suivi d'un résumé par capteur (nombre de relevés, intervalle médian, min, max, valeurs). Durée : `48` ou `48h` (heures), `2j` (jours), 24 h par défaut ;
+HA ne garde que 10 jours de relevés détaillés. Mots français courants acceptés (`dioxyde`, `pluie`, `vent`…). Ex. `/export dioxyde`, `/export 48 living room carbon`, `/export 2j wind`.
+Au plus 12 capteurs et 8 Mo par export (le Pi est sur une 4G à data comptée) : au-delà, le bot demande de préciser avec un mot de plus.
+
+**Sur le Pi** : `python3 exportdata.py [heures] [mot ...]` écrit `export_<heures>h.csv` pour les capteurs dont le nom contient **un des** mots
+(défaut : `download upload`, sur 24 h) et affiche le rythme des relevés. Ex. `python3 exportdata.py 48 wind`.
 
 ## Volume du routeur 4G (estimation)
 Les capteurs download / upload de l'intégration routeur donnent, toutes les 30 s, le débit moyen des 30 s écoulées (Wi-Fi compris : vérifié avec une caméra Wi-Fi).

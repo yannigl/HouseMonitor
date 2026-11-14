@@ -15,6 +15,7 @@ Commandes (depuis le chat configuré uniquement) :
   /arm all | <groupe> | <appareil>     arme (turn_on) les groupes définis dans config.json, ou un appareil d'un groupe
   /disarm all | <groupe> | <appareil>  désarme (turn_off), mêmes cibles (alias : /unarm)
   /stale [heures]              entités sans nouvelle depuis N h (24 par défaut) : les appareils à nettoyer
+  /export [heures] <mot>       relevés bruts des capteurs qui contiennent le mot, en pièce jointe CSV (administrateurs)
   Les réponses > 4000 caractères partent en pièce jointe .txt.
   /stop ping   | /start ping   heartbeat Healthchecks
   /stop monitor| /start monitor résumé du matin
@@ -39,6 +40,7 @@ import arm
 import smsfwd
 import sound
 import control
+import exportdata
 import heating
 import modemwatch
 import routercount
@@ -92,19 +94,24 @@ class Telegram:
                     raise
                 print(f"telegram : reconnexion ({e})", file=sys.stderr)
 
+    def send_document(self, data, filename, caption="", chat_id=None, mime="text/plain"):
+        """Fichier en pièce jointe (octets) ; la légende est tronquée à la limite de Telegram (1024)."""
+        chat_id = str(chat_id if chat_id is not None else CHAT_ID)
+        b = f"----{uuid.uuid4().hex}"
+        part = lambda name, val, extra="": (f"--{b}\r\nContent-Disposition: form-data; name=\"{name}\"{extra}"
+                                            f"\r\n\r\n").encode() + val + b"\r\n"
+        body = (part("chat_id", chat_id.encode())
+                + part("caption", caption[:1000].encode())
+                + part("document", data, f'; filename="{filename}"\r\nContent-Type: {mime}')
+                + f"--{b}--\r\n".encode())
+        return self.call("sendDocument", _body=body, _ctype=f"multipart/form-data; boundary={b}")
+
     def reply(self, text, filename="housemonitor.txt", chat_id=None):
         """Message court, ou pièce jointe .txt au-delà de la limite Telegram (4096). Par défaut dans le chat du propriétaire."""
         chat_id = str(chat_id if chat_id is not None else CHAT_ID)
         if len(text) <= 4000:
             return self.call("sendMessage", chat_id=chat_id, text=text)
-        b = f"----{uuid.uuid4().hex}"
-        part = lambda name, val, extra="": (f"--{b}\r\nContent-Disposition: form-data; name=\"{name}\"{extra}"
-                                            f"\r\n\r\n").encode() + val + b"\r\n"
-        body = (part("chat_id", chat_id.encode())
-                + part("caption", text.splitlines()[0].encode())
-                + part("document", text.encode(), f'; filename="{filename}"\r\nContent-Type: text/plain')
-                + f"--{b}--\r\n".encode())
-        return self.call("sendDocument", _body=body, _ctype=f"multipart/form-data; boundary={b}")
+        return self.send_document(text.encode(), filename, text.splitlines()[0], chat_id)
 
     def close(self):
         if self.conn:
@@ -136,6 +143,7 @@ COMMANDS = [
     ("arm", "Armer : /arm all, /arm <groupe> ou /arm <appareil>"),
     ("disarm", "Désarmer : /disarm all, /disarm <groupe> ou /disarm <appareil> (alias /unarm)"),
     ("stale", "Entités sans nouvelle depuis N h (24 par défaut) : appareils à nettoyer"),
+    ("export", "Relevés bruts d'un capteur en CSV : /export [heures] <mot> (ex. /export 24 dioxyde) (administrateurs)"),
     ("shutdown", "Éteindre le Pi (avec confirmation)"),
     ("stop", "stop listener|ping|monitor"),
     ("start", "start listener|ping|monitor"),
@@ -433,6 +441,24 @@ def handle(text, st, role="admin", chat_id=None):
             return vacuum.act(cmd, " ".join(parts[1:]) or None, chat_id)
         if cmd in ("/arm", "/disarm", "/unarm"):  # /unarm : alias de /disarm
             return arm.act(cmd == "/arm", " ".join(parts[1:]) or None, chat_id)
+        if cmd == "/export":
+            hours, words = exportdata.parse_args(args)
+            if not words:
+                return ("Usage : /export [heures] <mot> [mot …]\nEx. /export dioxyde · /export 48 living room carbon · /export 2j wind\n"
+                        "Les capteurs dont le nom, l'entity_id ou l'appareil contient tous les mots ; durée : 24 par défaut, « 48 » ou « 2j ».")
+
+            def export_after(tg, offset, hours=hours, words=words, target=chat_id if chat_id is not None else CHAT_ID):
+                try:
+                    csv, report = exportdata.build(hours, words, match_all=True, limit=exportdata.MAX_ENTITIES)
+                    if csv is None:
+                        tg.reply("\n".join(report), chat_id=target)
+                        return
+                    tg.send_document(csv.encode("utf-8"), exportdata.filename(hours, words), report[0], target, "text/csv")
+                    tg.reply("\n".join(report[1:]) or report[0], chat_id=target)
+                except Exception as e:
+                    print(f"/export KO : {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+                    tg.reply(f"❌ Export impossible : {type(e).__name__}: {e}", chat_id=target)
+            return "📄 Je prépare l'export…", export_after
         if cmd == "/stale":
             try:
                 hours = float(parts[1]) if parts[1:2] else 24.0
