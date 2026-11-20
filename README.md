@@ -78,6 +78,8 @@ les entités actuellement **indisponibles**. Un pied de page indique combien son
 sur l'état actuel : un capteur tombé en panne en cours de journée y figure encore avec ses mesures.
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
+| `/restart netatmo` | Recharge l'intégration **Netatmo** dans HA (comme « Recharger » dans Settings → Devices & services) : sans confirmation, HA ne redémarre pas |
+| `/restart homeassistant` · `/restart pi` | Redémarre **HA** / le **Pi**, après confirmation (`… confirm` dans les 60 s) ; un message arrive au retour (voir *Redémarrer HA, Netatmo ou le Pi*) |
 | `/shutdown` (alias `/stop pi`) | Éteint le Pi après confirmation par `/shutdown confirm` (voir *Éteindre le Pi à distance*) |
 | `/arm all` · `/arm <groupe>` · `/arm <appareil>` | Arme les groupes définis dans `config.json`, ou un appareil d'un groupe (voir *Armement*) |
 | `/disarm all` · `/disarm <groupe>` · `/disarm <appareil>` | Les désarme (alias : `/unarm`) |
@@ -246,8 +248,9 @@ puissance, énergie, courant, mouvement. `/state living room camera` affiche l'�
 ### Mettre à jour et redémarrer depuis Telegram (`/git pull`, `/restart`)
 `/git pull` exécute `git pull --ff-only origin <branche courante>` dans le dépôt du Pi et répond avec les nouveaux commits (seule cette
 commande est permise). Le listener redémarre seul quand un fichier `.py` a changé, **après vérification que tout le code se compile** : sinon
-il garde l'ancienne version et vous prévient. `/restart` (administrateurs) relance le listener pour relire `config.json` (lu seulement au
-démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart housemonitor-listener`.
+il garde l'ancienne version et vous prévient. `/restart` seul (administrateurs) relance le listener pour relire `config.json` (lu seulement au
+démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart housemonitor-listener`. `/restart` suivi d'un mot inconnu
+ne fait **rien** et rappelle les cibles possibles (une faute de frappe ne relance plus le listener).
 
 ### Utiliser le bot dans un groupe Telegram
 1. Créez le groupe, ajoutez le bot comme membre. Dans BotFather, `/setjoingroups` doit autoriser les groupes ; laissez le **mode confidentialité**
@@ -453,9 +456,21 @@ après un reboot l'heure peut être fausse jusqu'à la synchro réseau.
   port 443. Sans cela, les détections ne sont visibles que dans l'appli Netatmo.
 - `403 Forbidden` du flux vidéo local : recharger l'intégration Netatmo.
 
+### Redémarrer HA, Netatmo ou le Pi (`/restart netatmo|homeassistant|pi`)
+Administrateurs seulement (jamais les membres d'un groupe).
+- **`/restart netatmo`** recharge l'intégration Netatmo de HA, sans confirmation (HA ne redémarre pas, rien n'est perdu). C'est le geste à faire quand « Sans nouvelles » signale
+  « intégration non chargée dans HA ». La réponse donne l'état après rechargement (`chargée`, ou `nouvelle tentative en cours` avec la raison donnée par HA si Netatmo reste injoignable).
+- **`/restart homeassistant`** (alias `ha`, `home assistant`) demande confirmation (`/restart homeassistant confirm` dans les 60 s), puis redémarre HA : il vérifie d'abord sa configuration et **refuse** de redémarrer
+  si elle est invalide (le bot rapporte l'erreur, HA continue de tourner). Le bot reste réactif, puis écrit « Home Assistant est de retour (N s) » ; sinon il prévient au bout de 7 minutes.
+- **`/restart pi`** demande confirmation (`/restart pi confirm`), enregistre le compteur de data, puis exécute `systemctl reboot`. Au redémarrage du listener, un message « Le Pi a redémarré » arrive
+  (`reboot_requested.json`, ignoré par git). `shutdown.dry_run` simule aussi ce redémarrage. Pas de signal Healthchecks : le Pi revient bien avant la fin du délai de grâce.
+- Il faut le **jeton d'un administrateur** de HA (le jeton longue durée de votre compte propriétaire convient) pour recharger une intégration.
+- Le redémarrage du Pi demande un droit de plus : relancer **une fois** `sudo ./setup-power.sh` (la règle `sudoers` couvre maintenant `systemctl poweroff` **et** `systemctl reboot`, rien d'autre ; le script est sûr à relancer). Sans lui, `/restart pi`
+  répond que le droit est absent et ne fait rien.
+
 ### Éteindre le Pi à distance (`/shutdown`)
 Pour une coupure de courant prévue. Installation, **une fois** : `sudo ./setup-power.sh` (règle `sudoers`
-limitée à la seule commande `systemctl poweroff`).
+limitée à `systemctl poweroff` et `systemctl reboot`, rien d'autre).
 
 ```
 vous    : /shutdown

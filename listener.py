@@ -20,6 +20,8 @@ Commandes (depuis le chat configuré uniquement) :
   /stop ping   | /start ping   heartbeat Healthchecks
   /stop monitor| /start monitor résumé du matin
   /shutdown                    éteint le Pi après confirmation (/shutdown confirm), alias : /stop pi
+  /restart netatmo             recharge l'intégration Netatmo dans HA (sans redémarrer HA)
+  /restart homeassistant|pi    redémarre HA / le Pi, après confirmation (… confirm)
   /stop listener               passe en mode éco : 1 appel toutes les `slow_poll_hours` h
   /start listener              retour au long polling (réactif)
 """
@@ -29,6 +31,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import uuid
@@ -41,6 +44,7 @@ import smsfwd
 import sound
 import control
 import exportdata
+import hacontrol
 import heating
 import modemwatch
 import routercount
@@ -131,7 +135,7 @@ COMMANDS = [
     ("pause", "Aspirateur : pause — /pause <nom>"),
     ("state", "État et attributs d'une entité : /state <mot> (comme Developer tools → States)"),
     ("git", "Mettre à jour le code du Pi : /git pull"),
-    ("restart", "Redémarrer le listener (relit config.json) · /restart modem : redémarrer le modem 4G"),
+    ("restart", "Redémarrer : /restart netatmo (recharger l'intégration) · homeassistant · pi · modem (confirmation) · sans mot : le listener"),
     ("alerts", "Alertes du jour : entités surveillées, état, armement, dernière erreur (administrateurs)"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("zigbee", "Santé du réseau Zigbee : liens (LQI, RSSI), coupures, voisins — /zigbee [heures] (administrateurs)"),
@@ -263,6 +267,100 @@ def shutdown_signal_text(st):
 
 
 MODEM_PENDING = {"t": None}  # demande de redémarrage du modem en attente (en mémoire, comme pour /shutdown)
+HA_PENDING = {"t": None}  # idem pour /restart homeassistant
+PI_PENDING = {"t": None}  # idem pour /restart pi
+REBOOT_MARK = HERE / "reboot_requested.json"  # écrit juste avant un /restart pi : le listener annonce son retour au démarrage
+RESTART_USAGE = ("Usage : /restart netatmo (recharge l'intégration) · /restart homeassistant · /restart pi · /restart modem\n"
+                 "/restart seul relance le listener du bot. Les redémarrages demandent une confirmation.")
+
+
+def can_reboot():
+    """Le droit de redémarrer est-il en place (règle sudoers de setup-power.sh, à relancer après sa mise à jour) ?"""
+    if os.geteuid() == 0:
+        return True
+    try:
+        return subprocess.run(["sudo", "-n", "-l", "systemctl", "reboot"], capture_output=True, timeout=10).returncode == 0
+    except Exception:
+        return False
+
+
+def ack_updates(tg, offset):
+    try:  # acquitter la commande : sinon elle serait relivrée au prochain démarrage
+        tg.call("getUpdates", offset=offset, timeout=0)
+    except Exception as e:
+        print(f"acquittement Telegram KO : {e}", file=sys.stderr)
+
+
+def netatmo_reload(tg, offset, chat_id):
+    """Exécuté APRÈS l'envoi de la réponse : recharge l'intégration Netatmo de HA (jusqu'à une minute ou deux)."""
+    try:
+        ok, text = hacontrol.reload_integration("netatmo")
+    except Exception as e:
+        ok, text = False, f"❌ Rechargement impossible : {type(e).__name__}: {e}"
+    print(f"rechargement de Netatmo demandé : {ok}", flush=True)
+    tg.reply(text, chat_id=chat_id)
+
+
+def ha_restart(tg, offset, chat_id):
+    """Exécuté APRÈS l'envoi de la réponse : redémarre HA, puis attend son retour dans un thread (le bot reste réactif)."""
+    ack_updates(tg, offset)
+
+    def job():
+        try:
+            ok, text = hacontrol.restart_ha()
+        except Exception as e:
+            ok, text = False, f"❌ Redémarrage de HA impossible : {type(e).__name__}: {e}"
+        print(f"redémarrage de HA demandé : {ok}", flush=True)
+        try:
+            summary._send_to(chat_id if chat_id is not None else CHAT_ID, text)
+        except Exception as e:
+            print(f"message de retour de HA non envoyé : {e}", file=sys.stderr, flush=True)
+    threading.Thread(target=job, daemon=True).start()
+
+
+def reboot_pi(tg, offset, chat_id):
+    """Exécuté APRÈS l'envoi de l'acquittement : enregistre la data, note la demande (annonce du retour au démarrage), redémarre le Pi."""
+    ack_updates(tg, offset)
+    try:
+        log_net("listener")
+        pi_cum()
+    except Exception as e:
+        print(f"enregistrement data KO : {e}", file=sys.stderr)
+    try:
+        REBOOT_MARK.write_text(json.dumps({"chat": str(chat_id if chat_id is not None else CHAT_ID), "t": time.time()}))
+    except OSError as e:
+        print(f"reboot_requested.json non écrit : {e}", file=sys.stderr)
+    print(f"redémarrage du Pi : data enregistrée, attente {SHUTDOWN_DELAY} s, dry_run={SHUTDOWN_DRY_RUN}", flush=True)
+    time.sleep(SHUTDOWN_DELAY)
+    if SHUTDOWN_DRY_RUN:
+        REBOOT_MARK.unlink(missing_ok=True)
+        tg.reply("🧪 Simulation (shutdown.dry_run) : le Pi n'a PAS redémarré.", chat_id=chat_id)
+        return
+    cmd = ["systemctl", "reboot"] if os.geteuid() == 0 else ["sudo", "-n", "systemctl", "reboot"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:  # le Pi tourne toujours : on retire la note pour ne pas annoncer un retour qui n'a pas eu lieu
+        REBOOT_MARK.unlink(missing_ok=True)
+        print(f"redémarrage du Pi : échec (code {r.returncode}) : {(r.stderr or r.stdout).strip()[:200]}", flush=True)
+        tg.reply(f"❌ Redémarrage impossible : {(r.stderr or r.stdout).strip()[:300]}", chat_id=chat_id)
+
+
+def announce_reboot():
+    """Au démarrage du listener : si un /restart pi vient d'avoir lieu, prévenir que le Pi est revenu (le réseau peut mettre un moment à revenir)."""
+    try:
+        mark = json.loads(REBOOT_MARK.read_text())
+    except (OSError, ValueError):
+        return
+    REBOOT_MARK.unlink(missing_ok=True)
+    chat = str(mark.get("chat") or CHAT_ID)
+
+    def job():
+        for _ in range(20):
+            try:
+                summary._send_to(chat, "✅ Le Pi a redémarré (demandé par /restart pi). Home Assistant, Netatmo et les capteurs Zigbee mettent encore 1 à 3 minutes à revenir.")
+                return
+            except Exception:
+                time.sleep(15)
+    threading.Thread(target=job, daemon=True).start()
 
 
 def modem_restart(tg, offset, chat_id):
@@ -356,6 +454,41 @@ def handle(text, st, role="admin", chat_id=None):
         if t is None or time.monotonic() - t > CONFIRM_WINDOW:
             return "Aucune demande de redémarrage du modem en attente (ou expirée). Refaites /restart modem."
         return "📶 Redémarrage du modem demandé, patientez…", lambda tg, offset: modem_restart(tg, offset, chat_id)
+    if cmd == "/restart" and args:
+        name, confirmed = "".join(a for a in args if a != "confirm"), "confirm" in args  # « home assistant » = « homeassistant »
+        if name == "netatmo":
+            return "🔄 Je recharge l'intégration Netatmo dans HA…", lambda tg, offset: netatmo_reload(tg, offset, chat_id)
+        if name in ("homeassistant", "ha", "hass"):
+            if not confirmed:
+                HA_PENDING["t"] = time.monotonic()
+                return ("⚠️ Redémarrer Home Assistant ?\n• HA est indisponible 1 à 3 minutes : automatisations, alertes caméra, capteurs Zigbee et Netatmo\n"
+                        "• le Pi et ce bot restent en marche ; un message arrive quand HA est de retour\n"
+                        "• HA vérifie d'abord sa configuration et refuse de redémarrer si elle est invalide\n\n"
+                        f"Confirmez dans les {CONFIRM_WINDOW} s : /restart homeassistant confirm")
+            t = HA_PENDING["t"]
+            HA_PENDING["t"] = None
+            if t is None or time.monotonic() - t > CONFIRM_WINDOW:
+                return "Aucune demande de redémarrage de HA en attente (ou expirée). Refaites /restart homeassistant."
+            return "🔄 Redémarrage de Home Assistant demandé, patientez…", lambda tg, offset: ha_restart(tg, offset, chat_id)
+        if name in ("pi", "raspberry", "raspberrypi", "reboot"):
+            if not confirmed:
+                if not can_reboot():
+                    return ("❌ Redémarrage du Pi non autorisé : lancez d'abord sudo ./setup-power.sh sur le Pi "
+                            "(le script a été mis à jour : même s'il a déjà servi pour /shutdown, il faut le relancer une fois).")
+                PI_PENDING["t"] = time.monotonic()
+                return (f"⚠️ Redémarrer le Pi ?{' (SIMULATION : dry_run actif, il ne redémarrera pas)' if SHUTDOWN_DRY_RUN else ''}\n"
+                        "• coupure de 1 à 3 minutes : bot, Home Assistant, caméras, capteurs\n"
+                        "• il revient seul ; un message arrive à son retour\n"
+                        "• aucune alerte Healthchecks : il revient avant la fin du délai de grâce\n\n"
+                        f"Confirmez dans les {CONFIRM_WINDOW} s : /restart pi confirm")
+            t = PI_PENDING["t"]
+            PI_PENDING["t"] = None
+            if t is None or time.monotonic() - t > CONFIRM_WINDOW:
+                return "Aucune demande de redémarrage du Pi en attente (ou expirée). Refaites /restart pi."
+            return (f"{'🧪 Simulation' if SHUTDOWN_DRY_RUN else '🔄 Redémarrage'} du Pi dans {SHUTDOWN_DELAY} s. Un message arrive à son retour.",
+                    lambda tg, offset: reboot_pi(tg, offset, chat_id))
+        if name != "listener":
+            return f"❓ « /restart {' '.join(args)} » n'existe pas.\n\n{RESTART_USAGE}"
     if cmd == "/restart":
         problem = syntax_error()
         if problem:
@@ -529,6 +662,7 @@ def loop():
     print("listener démarré", flush=True)
     print(f"Telegram : chat privé {CHAT_ID} · groupes autorisés {sorted(GROUPS)} · administrateurs {sorted(ADMINS)} · membres {sorted(MEMBERS)}",
           flush=True)
+    announce_reboot()  # « Le Pi a redémarré » après un /restart pi
     arm.start_timers()  # retour automatique des /arm et /disarm temporaires
     modemwatch.start()  # thread : coupure d'Internet -> redémarrage automatique du modem (plafonné)
     routercount.start()  # thread : compteur de trafic du routeur 4G, un relevé toutes les 30 min
