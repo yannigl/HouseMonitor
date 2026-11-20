@@ -148,11 +148,12 @@ En tête du résumé, `⚠️ Sans nouvelles` liste tout appareil de mesure dont
 nouvelles depuis 6 h : `• Weather Station : aucune donnée depuis 27/10 12h03 (2 j)`. Sans cela, un capteur figé ressemble à une valeur « stable ».
 Un appareil qui n'émet que sur événement (porte, mouvement, bouton) n'est jamais signalé. Réglages de `summary` : `stale_hours` (6 ; `0` désactive),
 `stale_ignore` (textes dans le nom de l'appareil à ne pas signaler). `/stale` donne la liste détaillée de toutes les entités silencieuses.
-**Caméras et détecteurs armables** : le même bloc signale aussi une caméra (`camera.*`) ou une entité de la config `arm` qui n'est plus utilisable, ce que le résumé écartait auparavant sans un mot :
-`• Netatmo Salon : introuvable dans HA, vue le 18/11 07h31` (l'entité a disparu de HA : renommée, supprimée), `… : intégration non chargée dans HA` (l'intégration, par exemple Netatmo, ne démarre plus : jeton expiré, panne du cloud),
-`… : indisponible depuis 19/11 21h06 (10 h)` (au bout de `stale_hours` h seulement : les micro-coupures sont normales). Le Pi retient dans `monitored_seen.json` (ignoré par git) les caméras déjà vues en état de marche, d'où le « vue le » ;
-une caméra qui avait déjà disparu avant la mise à jour n'est connue qu'après sa première apparition, sauf si elle figure en toutes lettres dans un groupe `arm` (`"entities": [...]`).
-`"summary": {"monitored_ignore": ["camera.netatmo_jardin"]}` retire une caméra volontairement supprimée de cette liste.
+**Intégration qui ne se recharge pas, caméras disparues** : le résumé écartait sans un mot toute entité « fantôme » (HA la marque `restored` quand son intégration n'est pas chargée), et « Sans nouvelles » ne regardait que les capteurs de mesure.
+Après un redémarrage du Pi, une intégration qui ne repart pas (Netatmo : jeton expiré, cloud injoignable, réseau pas encore prêt au démarrage) faisait donc disparaître **tous** ses appareils, caméra et capteurs de CO2 compris, sans trace. Le bloc signale maintenant :
+- un **appareil qui marchait** (capteur de mesure ou caméra utilisable) et dont toutes les entités sont désormais fantômes : `• Netatmo Weather Station - Living Room : intégration non chargée dans HA, vue le 19/11 14h40` (un appareil qui garde une entité utilisable n'est pas signalé) ;
+- une **caméra** (`camera.*`) ou une entité de la config `arm` : `… : introuvable dans HA` (renommée, supprimée), ou `… : indisponible depuis 19/11 21h06 (10 h)` (au bout de `stale_hours` h seulement : les micro-coupures sont normales).
+Le Pi retient dans `monitored_seen.json` (ignoré par git) ce qui a déjà marché, d'où le « vue le » : les fantômes d'une ancienne installation, jamais vus en état de marche, ne sont pas signalés. Un appareil déjà tombé avant la mise à jour de ce code n'est donc connu qu'après sa première
+apparition (sauf une caméra, signalée tout de suite). `"summary": {"monitored_ignore": ["camera.netatmo_jardin", "ancienne station"]}` retire de cette liste ce que vous avez supprimé exprès (entity_id ou texte du nom).
 
 ### Résumé du matin : détecteurs, aspirateur, lignes masquées
 - **🛡 Détecteurs / caméras** : les entités de la config `arm` (groupes et surnoms), les caméras et les détecteurs de mouvement

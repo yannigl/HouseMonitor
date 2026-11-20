@@ -195,32 +195,56 @@ def configured_armed():
         return set()
 
 
-def monitored_missing(cur, armed, hours=None):
-    """Caméras (camera.*) et entités armables qu'on attend mais qui ne sont plus utilisables : [(nom, raison, dernière fois vue)].
-    Le résumé écarte une entité absente de HA ou « fantôme » (intégration non chargée) sans un mot, et « Sans nouvelles » ne regarde que les capteurs
-    de mesure : une caméra tombée n'y figurait donc jamais. On retient dans monitored_seen.json celles qui ont déjà marché ; une indisponible
-    n'est signalée qu'après `hours` h (stale_hours), les micro-coupures sont normales."""
+def monitored_missing(cur, armed, dmap=None, hours=None):
+    """Ce qu'on attend et qui n'est plus utilisable : [(nom, raison, dernière fois vu)].
+    • APPAREILS qui marchaient (capteur de mesure ou caméra utilisable) et dont toutes les entités sont maintenant « fantômes » : leur intégration
+      (Netatmo après un redémarrage du Pi…) ne s'est pas rechargée. Le résumé les écarte sans un mot, et « Sans nouvelles » ignore les fantômes.
+    • CAMÉRAS (camera.*) et entités armables : introuvables dans HA, fantômes, ou indisponibles depuis `hours` h (stale_hours ; une micro-coupure est normale).
+    monitored_seen.json retient ce qui a déjà marché : les fantômes d'une ancienne installation, jamais vus en état de marche, ne sont pas signalés."""
     hours = STALE_HOURS if hours is None else hours
     if not hours:
         return []
+    dmap = dmap or {}
     now = datetime.now().astimezone()
     try:
         seen = json.loads(SEEN_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         seen = {}
     seen = seen if isinstance(seen, dict) else {}
+    stamp = now.isoformat(timespec="seconds")
     watched = lambda e: (e.split(".")[0] == "camera" or e in armed) and not any(e.startswith(p) for p in EXCLUDE)
-    working = set()
+    working, dev_ok, dev_ghost, dev_name = set(), set(), set(), {}
     for e, st in cur.items():
-        if watched(e) and not is_ghost(st) and st["state"] not in ("unavailable", "unknown"):
-            seen[e] = {"n": st.get("attributes", {}).get("friendly_name", e), "t": now.isoformat(timespec="seconds")}
-            working.add(e)
-    rows = []
-    for e in sorted(set(seen) | configured_armed() | {e for e in cur if watched(e)}):
-        if e in working or any(x in norm(e) for x in MONITOR_IGNORE):
+        a = st.get("attributes", {})
+        d = (dmap.get(e) or {}).get("d")
+        if d:
+            dev_name.setdefault(d, dmap[e].get("n") or d)
+        if is_ghost(st):
+            if d:
+                dev_ghost.add(d)
             continue
+        if st["state"] in ("unavailable", "unknown"):
+            continue
+        measures = e.startswith("sensor.") and a.get("state_class") == "measurement" and not is_battery(a.get("friendly_name", ""))
+        if watched(e):
+            seen[e] = {"n": a.get("friendly_name", e), "t": stamp}
+            working.add(e)
+        if d and (watched(e) or measures):
+            dev_ok.add(d)
+            seen["dev:" + d] = {"n": dev_name[d], "t": stamp}
+    ignored = lambda *names: any(x in norm(n) for x in MONITOR_IGNORE for n in names if n)
+    when = lambda k: datetime.fromisoformat(seen[k]["t"]).astimezone() if seen.get(k, {}).get("t") else None
+    rows, flagged = [], set()
+    for key in sorted(k for k in seen if k.startswith("dev:")):
+        d = key[4:]
+        if d in dev_ghost and d not in dev_ok and not ignored(seen[key].get("n")):
+            flagged.add(d)
+            rows.append((seen[key].get("n") or d, "intégration non chargée dans HA", when(key)))
+    for e in sorted({k for k in seen if not k.startswith("dev:")} | configured_armed() | {e for e in cur if watched(e)}):
         st = cur.get(e)
         name = (st or {}).get("attributes", {}).get("friendly_name") or seen.get(e, {}).get("n") or e
+        if e in working or (dmap.get(e) or {}).get("d") in flagged or ignored(e, name):
+            continue
         if st is None:
             reason = "introuvable dans HA"
         elif is_ghost(st):
@@ -231,15 +255,14 @@ def monitored_missing(cur, armed, hours=None):
             if age < hours:
                 continue
             reason = f"indisponible depuis {since:%d/%m %Hh%M} ({fmt_age(age)})"
-        last = seen.get(e, {}).get("t")
-        rows.append((name, reason, datetime.fromisoformat(last).astimezone() if last else None))
+        rows.append((name, reason, when(e)))
     try:  # écriture atomique : le listener et le cron peuvent tourner en même temps
         tmp = SEEN_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(seen, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, SEEN_FILE)
     except OSError as e:
         print(f"monitored_seen.json non écrit : {e}", file=sys.stderr)
-    return rows
+    return sorted(rows, key=lambda r: r[0].lower())
 
 
 def silent_text(rows, missing=()):
@@ -1570,11 +1593,6 @@ def build_report(with_chart=True):
     cur = {s["entity_id"]: s for s in sts}
     ents = discover(sts)
     armed = armed_entities(cur)
-    try:  # caméras et entités armables qui ont disparu de HA ou ne sont plus chargées : signalées en tête
-        missing_rows = monitored_missing(cur, armed)
-    except Exception as e:
-        print(f"caméras manquantes illisibles : {type(e).__name__}: {e}", file=sys.stderr)
-        missing_rows = []
     for eid in armed:  # caméras et autres entités armables : résumées même si leur domaine n'est pas dans « domains »
         if eid in cur and eid not in ents and not is_ghost(cur[eid]):
             ents[eid] = (cur[eid].get("attributes", {}).get("friendly_name", eid), "")
@@ -1594,6 +1612,11 @@ def build_report(with_chart=True):
         dev_lines, absorbed = device_lines(ents, hist, dmap, cur, skip_devs={r[3] for r in silent_rows})
     except Exception as e:
         print(f"regroupement par appareil impossible : {type(e).__name__}: {e}", file=sys.stderr)
+    try:  # appareils dont l'intégration ne charge plus, caméras disparues ou indisponibles : signalés en tête
+        missing_rows = monitored_missing(cur, armed, dmap)
+    except Exception as e:
+        print(f"appareils manquants illisibles : {type(e).__name__}: {e}", file=sys.stderr)
+        missing_rows = []
     # appareils ayant au moins un détecteur / une caméra ; appareils ayant un aspirateur (Roomba…)
     det_devs = {dmap[e]["d"] for e, (n, _) in ents.items() if (dmap.get(e) or {}).get("d") and is_detector(e, n, armed)}
     vac_devs = {r["d"] for e, r in dmap.items() if e.startswith("vacuum.") and r.get("d")}
