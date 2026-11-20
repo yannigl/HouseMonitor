@@ -470,7 +470,7 @@ après un reboot l'heure peut être fausse jusqu'à la synchro réseau.
 ### Prises remises en marche après une coupure (`switchrestore.py`, `/restore`)
 Après une coupure de courant, une prise Zigbee revient avec son réglage de démarrage, souvent « éteinte », même si elle était allumée. Le listener contrôle toutes les 5 minutes les prises éteintes et **rallume celles qui étaient allumées juste avant**,
 d'après l'**historique de HA** (pas d'instantané : il serait écrasé par la coupure). Un passage de `on` à `off` est attribué à une coupure dans deux cas seulement :
-- **Redémarrage du Pi** : le `off` est enregistré dans l'heure qui suit le démarrage du Pi (`boot_window_minutes`). Une prise privée de courant reste « allumée » dans HA tant qu'il ne l'a pas relue (Zigbee ne la déclare indisponible qu'après ~2 h de silence) :
+- **Redémarrage du Pi ou de HA** : le `off` est enregistré dans l'heure qui suit un démarrage (`boot_window_minutes`). Une prise privée de courant reste « allumée » dans HA tant qu'il ne l'a pas relue (Zigbee ne la déclare indisponible qu'après ~2 h de silence) :
   le redémarrage lui fait lire sa vraie position. Cas réel : puissance tombée de 249 à 0 W vers 14h12, Pi redémarré à 14h48, `off` enregistré à 14h50.
 - **Indisponibilité** : `on` → `unavailable` → `off` (coupure plus longue, que Zigbee a fini par constater).
 
@@ -479,7 +479,7 @@ Une prise éteinte à la main passe de `on` à `off` sans l'un ni l'autre : elle
 - Le `off` doit dater d'au moins 3 minutes (`settle_seconds`) ; seules les prises revenues depuis moins de 6 h (`max_age_hours`) sont traitées automatiquement ; 3 essais au plus par prise, puis un message d'abandon.
 - Ne sont jamais touchées : les entités de `control.exclude` (prise du routeur, pompe d'arrosage…) et celles de `restore.exclude`, entity_id exacts ou préfixes. **Mettez-y tout ce qu'il serait dangereux de rallumer seul.** Domaines : ceux de `control.domains` (`switch` par défaut).
 - `/restore [heures]` (administrateurs) le fait tout de suite sur la période demandée (24 h par défaut ; `/restore 48` pour avant-hier) ; `/restore list` montre les candidates sans rien actionner. Sur le Pi : `python3 switchrestore.py [heures]` (liste seulement).
-- **Limites** : une coupure sans redémarrage du Pi et plus courte que ~2 h n'est pas reconnue (HA garde « allumée » une prise qui est éteinte) ; une prise éteinte à la main dans l'heure qui suit un redémarrage, ou pendant une coupure, est rallumée ; seul le dernier démarrage du Pi est connu.
+- **Limites** : une coupure sans redémarrage du Pi et plus courte que ~2 h n'est pas reconnue (HA garde « allumée » une prise qui est éteinte) ; une prise éteinte à la main dans l'heure qui suit un redémarrage, ou pendant une coupure, est rallumée ; les démarrages pris en compte sont le dernier du Pi et ceux que le journal de HA signale (`started`) : un Pi qui a redémarré deux fois, comme le 19/11 à 14h16 puis 14h48, est couvert si le journal est lisible (`/coupures debug`).
   Les autres entités d'un même appareil (verrou enfant, rétro-éclairage) sont remises comme avant, elles aussi.
 - Réglages : `"restore": {"enabled": true, "every_minutes": 5, "max_age_hours": 6, "settle_seconds": 180, "boot_window_minutes": 60, "exclude": []}` ; `"enabled": false` coupe le contrôle automatique (`/restore` marche toujours).
 - Complément à régler **sur la prise** si son modèle le permet : l'état au retour du courant (« power on behavior » / « power outage memory » : mémoriser la dernière position), pour ne pas dépendre du Pi.

@@ -52,8 +52,9 @@ def boot_time():
 
 def last_outage(rows, boot=None):
     """Dernier passage à « off » d'une prise qui était « on », attribuable à une coupure : ("indisponibilité" | "redémarrage", début, retour) ; None s'il n'y en a pas,
-    si le passage à « off » est volontaire (ni indisponibilité entre les deux, ni dans l'heure qui suit le démarrage `boot`), si la prise a été rallumée depuis
-    ou si elle n'est pas éteinte maintenant. `début` : début de l'indisponibilité, ou démarrage du Pi."""
+    si le passage à « off » est volontaire (ni indisponibilité entre les deux, ni dans l'heure qui suit un démarrage), si la prise a été rallumée depuis
+    ou si elle n'est pas éteinte maintenant. `boot` : un démarrage (datetime) ou la liste des démarrages du Pi / de HA ; `début` : début de l'indisponibilité, ou ce démarrage."""
+    starts = [] if boot is None else list(boot) if isinstance(boot, (list, tuple, set)) else [boot]
     last, gap, event = None, None, None
     for st in rows:
         s = st.get("state")
@@ -64,14 +65,28 @@ def last_outage(rows, boot=None):
                 t = summary.ts(st)
                 if gap is not None:
                     event = ("indisponibilité", gap, t)
-                elif boot is not None and boot - timedelta(minutes=2) <= t <= boot + BOOT_WINDOW:
-                    event = ("redémarrage", boot, t)
                 else:
-                    event = None
+                    near = next((b for b in sorted(starts) if b - timedelta(minutes=2) <= t <= b + BOOT_WINDOW), None)
+                    event = ("redémarrage", near, t) if near else None
             elif s == "on":
                 event = None
             gap, last = None, s
     return event if rows and rows[-1].get("state") == "off" else None
+
+
+def starts(begin, end):
+    """Démarrages connus du Pi et de HA entre `begin` et `end` : le dernier démarrage du Pi (/proc/stat) et les « started » du journal de HA. Un Pi peut avoir
+    redémarré plusieurs fois (14h16 puis 14h48 dans le cas réel) : ne connaître que le dernier manquerait les prises revenues éteintes au premier."""
+    out = []
+    b = boot_time()
+    if b and b >= begin:
+        out.append(b)
+    try:
+        import outages  # import tardif : outages importe boot_time d'ici
+        out += outages.ha_events(begin, end)[0]["started"]
+    except Exception as e:
+        print(f"démarrages de HA illisibles : {type(e).__name__}: {e}", file=sys.stderr)
+    return sorted(out)
 
 
 def candidates(hours):
@@ -81,8 +96,9 @@ def candidates(hours):
     if not ids:
         return []
     now = datetime.now(timezone.utc)
-    boot = boot_time()
-    hist = summary.history(ids, now - timedelta(hours=hours + 72), now)  # 3 jours de plus : l'état d'avant la coupure
+    begin = now - timedelta(hours=hours + 72)  # 3 jours de plus : l'état d'avant la coupure
+    boot = starts(begin, now)
+    hist = summary.history(ids, begin, now)
     out = []
     for e in ids:
         ev = last_outage(hist.get(e, []), boot)
