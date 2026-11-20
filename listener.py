@@ -20,6 +20,7 @@ Commandes (depuis le chat configuré uniquement) :
   /stop ping   | /start ping   heartbeat Healthchecks
   /stop monitor| /start monitor résumé du matin
   /shutdown                    éteint le Pi après confirmation (/shutdown confirm), alias : /stop pi
+  /restart listener            relance le bot (relit config.json et le code)
   /restart netatmo             recharge l'intégration Netatmo dans HA (sans redémarrer HA)
   /restart homeassistant       redémarre HA (sans confirmation) ; /restart pi : le Pi, après confirmation (… confirm)
   /stop listener               passe en mode éco : 1 appel toutes les `slow_poll_hours` h
@@ -135,7 +136,7 @@ COMMANDS = [
     ("pause", "Aspirateur : pause — /pause <nom>"),
     ("state", "État et attributs d'une entité : /state <mot> (comme Developer tools → States)"),
     ("git", "Mettre à jour le code du Pi : /git pull"),
-    ("restart", "Redémarrer : /restart netatmo (recharger l'intégration) · homeassistant · pi · modem (pi et modem : confirmation) · sans mot : le listener"),
+    ("restart", "Redémarrer : /restart netatmo (recharger l'intégration) · homeassistant · pi · modem (pi et modem : confirmation) · listener : le bot"),
     ("alerts", "Alertes du jour : entités surveillées, état, armement, dernière erreur (administrateurs)"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("zigbee", "Santé du réseau Zigbee : liens (LQI, RSSI), coupures, voisins — /zigbee [heures] (administrateurs)"),
@@ -269,8 +270,8 @@ def shutdown_signal_text(st):
 MODEM_PENDING = {"t": None}  # demande de redémarrage du modem en attente (en mémoire, comme pour /shutdown)
 PI_PENDING = {"t": None}  # idem pour /restart pi
 REBOOT_MARK = HERE / "reboot_requested.json"  # écrit juste avant un /restart pi : le listener annonce son retour au démarrage
-RESTART_USAGE = ("Usage : /restart netatmo (recharge l'intégration) · /restart homeassistant · /restart pi · /restart modem\n"
-                 "/restart seul relance le listener du bot. Le Pi et le modem demandent une confirmation.")
+RESTART_USAGE = ("Usage : /restart listener (le bot, relit config.json) · /restart netatmo (recharge l'intégration) · /restart homeassistant · /restart pi · /restart modem\n"
+                 "Le Pi et le modem demandent une confirmation.")
 
 
 def can_reboot():
@@ -453,7 +454,7 @@ def handle(text, st, role="admin", chat_id=None):
         if t is None or time.monotonic() - t > CONFIRM_WINDOW:
             return "Aucune demande de redémarrage du modem en attente (ou expirée). Refaites /restart modem."
         return "📶 Redémarrage du modem demandé, patientez…", lambda tg, offset: modem_restart(tg, offset, chat_id)
-    if cmd == "/restart" and args:
+    if cmd == "/restart":
         name, confirmed = "".join(a for a in args if a != "confirm"), "confirm" in args  # « home assistant » = « homeassistant »
         if name == "netatmo":
             return "🔄 Je recharge l'intégration Netatmo dans HA…", lambda tg, offset: netatmo_reload(tg, offset, chat_id)
@@ -476,9 +477,8 @@ def handle(text, st, role="admin", chat_id=None):
                 return "Aucune demande de redémarrage du Pi en attente (ou expirée). Refaites /restart pi."
             return (f"{'🧪 Simulation' if SHUTDOWN_DRY_RUN else '🔄 Redémarrage'} du Pi dans {SHUTDOWN_DELAY} s. Un message arrive à son retour.",
                     lambda tg, offset: reboot_pi(tg, offset, chat_id))
-        if name != "listener":
-            return f"❓ « /restart {' '.join(args)} » n'existe pas.\n\n{RESTART_USAGE}"
-    if cmd == "/restart":
+        if name != "listener":  # « /restart » seul ne fait plus rien : il faut dire quoi redémarrer
+            return (f"❓ « /restart {' '.join(args)} » n'existe pas.\n\n" if args else "") + RESTART_USAGE
         problem = syntax_error()
         if problem:
             return f"❌ Redémarrage annulé : le code ne se compile pas.\n{problem}"

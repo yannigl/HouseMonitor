@@ -146,14 +146,14 @@ def status_text():
     """/alerts : état de la surveillance (pour comprendre pourquoi une alerte n'est pas partie)."""
     ws = watches()
     if not ws:
-        return "Aucun appareil surveillé : ajoutez « alerts.watch » dans config.json (voir README), puis /restart."
+        return "Aucun appareil surveillé : ajoutez « alerts.watch » dans config.json (voir README), puis /restart listener."
     done = load_done()
     lines = ["🚨 Alertes du jour"]
     armed_cache = {}
     for w in ws:
         if not VALID_ID.match(w["entity"]):
             lines.append(f"\n• {w['name']} ({w['entity']})\n   ❌ identifiant invalide : un entity_id a la forme « binary_sensor.nom » (un seul point). "
-                         "Corrigez alerts.watch dans config.json puis /restart.")
+                         "Corrigez alerts.watch dans config.json puis /restart listener.")
             continue
         try:
             s = summary.http(f"{summary.HA}/api/states/{w['entity']}", summary.AUTH)

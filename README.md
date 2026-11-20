@@ -246,12 +246,12 @@ Quelques mots français courants cherchent aussi l'anglais : température, humid
 puissance, énergie, courant, mouvement. `/state living room camera` affiche l'état, la date du dernier changement et les attributs (jusqu'à
 12 entités ; jetons d'accès et adresses d'image masqués) : utile sans accès à Developer tools de HA.
 
-### Mettre à jour et redémarrer depuis Telegram (`/git pull`, `/restart`)
+### Mettre à jour et redémarrer depuis Telegram (`/git pull`, `/restart listener`)
 `/git pull` exécute `git pull --ff-only origin <branche courante>` dans le dépôt du Pi et répond avec les nouveaux commits (seule cette
 commande est permise). Le listener redémarre seul quand un fichier `.py` a changé, **après vérification que tout le code se compile** : sinon
-il garde l'ancienne version et vous prévient. `/restart` seul (administrateurs) relance le listener pour relire `config.json` (lu seulement au
-démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart housemonitor-listener`. `/restart` suivi d'un mot inconnu
-ne fait **rien** et rappelle les cibles possibles (une faute de frappe ne relance plus le listener).
+il garde l'ancienne version et vous prévient. `/restart listener` (administrateurs) relance le listener pour relire `config.json` (lu seulement au
+démarrage), sans passer par systemd. Équivalent : `sudo systemctl restart housemonitor-listener`. `/restart` seul, ou suivi d'un mot inconnu,
+ne fait **rien** et rappelle les cibles possibles (`listener`, `netatmo`, `homeassistant`, `pi`, `modem`) : une faute de frappe ne relance plus le bot.
 
 ### Utiliser le bot dans un groupe Telegram
 1. Créez le groupe, ajoutez le bot comme membre. Dans BotFather, `/setjoingroups` doit autoriser les groupes ; laissez le **mode confidentialité**
@@ -273,7 +273,7 @@ ne fait **rien** et rappelle les cibles possibles (une faute de frappe ne relanc
      après `/launch`, message de fin d'un `/arm` ou `/disarm` avec durée. Votre chat privé les reçoit toujours aussi ; le groupe ne reçoit rien
      des commandes lancées en privé, sauf s'il est dans `telegram_notify_chats`.
    - `telegram_notify_chats` : chats qui reçoivent aussi tous les messages sortants du bot (résumé du matin, alertes, fin de ménage…). Vide par défaut.
-4. `/restart` dans votre chat privé (ou `sudo systemctl restart housemonitor-listener`) : la configuration n'est lue qu'au démarrage.
+4. `/restart listener` dans votre chat privé (ou `sudo systemctl restart housemonitor-listener`) : la configuration n'est lue qu'au démarrage.
 
 ### SMS reçus par le routeur : transmission à Telegram (`smsfwd.py`, dans le listener)
 Pour qu'aucun SMS envoyé au routeur ne soit perdu quand vous n'êtes pas là. Un thread du listener lit la boîte de réception du routeur et

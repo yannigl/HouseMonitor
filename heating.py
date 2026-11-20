@@ -83,7 +83,7 @@ def usage():
         by_id = {s["entity_id"]: s for s in cl}
         lines += [f"• {_describe(by_id[e])}" if e in by_id else f"• {e} : introuvable" for e in ent]
     else:
-        lines.append("Aucun thermostat configuré : ajoutez `\"heating\": {\"entities\": [\"climate.…\"]}` dans config.json (une entité par maison), puis /restart.")
+        lines.append("Aucun thermostat configuré : ajoutez `\"heating\": {\"entities\": [\"climate.…\"]}` dans config.json (une entité par maison), puis /restart listener.")
     if cl:
         lines += ["", "Thermostats trouvés dans HA :"] + [f"• {_describe(s)}" for s in cl]
     return "\n".join(lines)
