@@ -458,6 +458,15 @@ après un reboot l'heure peut être fausse jusqu'à la synchro réseau.
   port 443. Sans cela, les détections ne sont visibles que dans l'appli Netatmo.
 - `403 Forbidden` du flux vidéo local : recharger l'intégration Netatmo.
 
+### Coupure générale ou prise seule ? (`/coupures`)
+`/coupures [heures]` (administrateurs ; 48 h par défaut, 240 au plus) reconstitue ce qui s'est passé et conclut pour chaque prise redémarrée :
+- **Prises** : une prise qui perd le courant revient à sa dernière valeur sauvegardée, donc son **compteur d'énergie recule** (38,39 → 38,36 kWh) ; c'est la signature utilisée (baisse d'au moins 0,01 kWh), pour les prises qui mesurent l'énergie.
+- **Home Assistant** : le journal de HA (`/api/logbook`) donne ses démarrages. Un démarrage dans les 10 minutes qui précèdent le retour de la prise : coupure **générale** (le Pi a perdu le courant avec la prise), ou redémarrage du Pi.
+  Journal lisible sans démarrage : **la prise seule** a perdu le courant ; plusieurs prises en même temps sans démarrage de HA : un circuit coupé sans le Pi. Journal illisible : le bot le dit au lieu de deviner (`/coupures debug` montre les champs reçus de HA).
+- **Pi** : le listener écrit un **signe de vie** toutes les 2 minutes (`uptime_beat.json`, `"outages": {"beat_seconds": 120}`) et note, au démarrage, l'arrêt du Pi avec ses heures exactes, **propre** (arrêt demandé) ou **brutal** (coupure de courant, plantage), dans `outages_log.json`
+  (90 jours, ignorés par git). Ce suivi n'existe qu'à partir de la mise en service ; avant, seuls le journal de HA et les compteurs des prises renseignent. Sur le Pi : `python3 outages.py [heures]`.
+- Limites : une prise sans compteur d'énergie n'est pas vue ; un compteur qui repart à 0 à chaque coupure est vu aussi, mais une remise à zéro volontaire serait comptée.
+
 ### Prises remises en marche après une coupure (`switchrestore.py`, `/restore`)
 Après une coupure de courant, une prise Zigbee revient avec son réglage de démarrage, souvent « éteinte », même si elle était allumée. Le listener contrôle toutes les 5 minutes les prises éteintes et **rallume celles qui étaient allumées juste avant**,
 d'après l'**historique de HA** (pas d'instantané : il serait écrasé par la coupure). Un passage de `on` à `off` est attribué à une coupure dans deux cas seulement :

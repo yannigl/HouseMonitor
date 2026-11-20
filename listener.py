@@ -20,6 +20,7 @@ Commandes (depuis le chat configuré uniquement) :
   /stop ping   | /start ping   heartbeat Healthchecks
   /stop monitor| /start monitor résumé du matin
   /shutdown                    éteint le Pi après confirmation (/shutdown confirm), alias : /stop pi
+  /coupures [heures] | debug   reconstitue les arrêts du Pi / de HA et les prises redémarrées : coupure générale ou prise seule ?
   /restore [heures] | list     remet en marche les prises allumées avant une coupure et revenues éteintes (list : sans rien actionner)
   /restart listener            relance le bot (relit config.json et le code)
   /restart netatmo             recharge l'intégration Netatmo dans HA (sans redémarrer HA)
@@ -49,6 +50,7 @@ import exportdata
 import hacontrol
 import heating
 import modemwatch
+import outages
 import routercount
 import summary
 import switchrestore
@@ -131,6 +133,7 @@ COMMANDS = [
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA regroupés — /list <mot> : détail, /list all : toutes les entités"),
     ("update", "Le résumé du matin, maintenant — /update all : tout, /update <mot> : ce qui contient le mot"),
+    ("coupures", "Coupures de courant : arrêts du Pi et de HA, prises redémarrées, coupure générale ou prise seule — /coupures [heures] (administrateurs)"),
     ("restore", "Rallumer les prises qui étaient allumées avant une coupure : /restore [heures] · /restore list (administrateurs)"),
     ("on", "Allumer un interrupteur : /on <nom de l'appareil>"),
     ("off", "Éteindre un interrupteur : /off <nom de l'appareil>"),
@@ -584,6 +587,9 @@ def handle(text, st, role="admin", chat_id=None):
                     print(f"/export KO : {type(e).__name__}: {e}", file=sys.stderr, flush=True)
                     tg.reply(f"❌ Export impossible : {type(e).__name__}: {e}", chat_id=target)
             return "📄 Je prépare l'export…", export_after
+        if cmd == "/coupures":
+            nums = [a for a in args if a.replace(".", "", 1).isdigit()]
+            return outages.report(min(float(nums[0]), 240.0) if nums else 48.0, debug="debug" in args)
         if cmd == "/restore":
             listing = args[:1] == ["list"]
             nums = [a for a in args if a.replace(".", "", 1).isdigit()]
@@ -660,6 +666,7 @@ def loop():
           flush=True)
     announce_reboot()  # « Le Pi a redémarré » après un /restart pi
     arm.start_timers()  # retour automatique des /arm et /disarm temporaires
+    outages.start()  # signe de vie : note les arrêts du Pi (coupure de courant, plantage, redémarrage)
     switchrestore.start()  # thread : prises revenues éteintes après une coupure -> remises en marche
     modemwatch.start()  # thread : coupure d'Internet -> redémarrage automatique du modem (plafonné)
     routercount.start()  # thread : compteur de trafic du routeur 4G, un relevé toutes les 30 min
@@ -737,11 +744,18 @@ def loop():
 
 def main():
     # systemd envoie SIGTERM à l'arrêt et au reboot : on enregistre alors la data en cours avant de partir
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    asked = {"stop": False}  # un plantage du listener ne doit pas passer pour un arrêt propre
+
+    def on_sigterm(*_):
+        asked["stop"] = True
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, on_sigterm)
     try:
         loop()
     finally:
         try:
+            if asked["stop"]:
+                outages.mark_clean()  # arrêt demandé au système : le prochain démarrage saura qu'il était propre
             log_net("listener")
             pi_cum()
         except Exception as e:

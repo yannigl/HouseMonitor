@@ -24,3 +24,7 @@ monitored_seen.tmp
 reboot_requested.json
 restore_state.json
 restore_state.tmp
+uptime_beat.json
+outages_log.json
+uptime_beat.tmp
+outages_log.tmp
