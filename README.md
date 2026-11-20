@@ -79,7 +79,8 @@ sur l'état actuel : un capteur tombé en panne en cours de journée y figure en
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
 | `/restart netatmo` | Recharge l'intégration **Netatmo** dans HA (comme « Recharger » dans Settings → Devices & services) : sans confirmation, HA ne redémarre pas |
-| `/restart homeassistant` · `/restart pi` | Redémarre **HA** / le **Pi**, après confirmation (`… confirm` dans les 60 s) ; un message arrive au retour (voir *Redémarrer HA, Netatmo ou le Pi*) |
+| `/restart homeassistant` | Redémarre **HA**, sans confirmation ; un message arrive à son retour (voir *Redémarrer HA, Netatmo ou le Pi*) |
+| `/restart pi` | Redémarre le **Pi**, après confirmation (`/restart pi confirm` dans les 60 s) ; un message arrive à son retour |
 | `/shutdown` (alias `/stop pi`) | Éteint le Pi après confirmation par `/shutdown confirm` (voir *Éteindre le Pi à distance*) |
 | `/arm all` · `/arm <groupe>` · `/arm <appareil>` | Arme les groupes définis dans `config.json`, ou un appareil d'un groupe (voir *Armement*) |
 | `/disarm all` · `/disarm <groupe>` · `/disarm <appareil>` | Les désarme (alias : `/unarm`) |
@@ -460,7 +461,7 @@ après un reboot l'heure peut être fausse jusqu'à la synchro réseau.
 Administrateurs seulement (jamais les membres d'un groupe).
 - **`/restart netatmo`** recharge l'intégration Netatmo de HA, sans confirmation (HA ne redémarre pas, rien n'est perdu). C'est le geste à faire quand « Sans nouvelles » signale
   « intégration non chargée dans HA ». La réponse donne l'état après rechargement (`chargée`, ou `nouvelle tentative en cours` avec la raison donnée par HA si Netatmo reste injoignable).
-- **`/restart homeassistant`** (alias `ha`, `home assistant`) demande confirmation (`/restart homeassistant confirm` dans les 60 s), puis redémarre HA : il vérifie d'abord sa configuration et **refuse** de redémarrer
+- **`/restart homeassistant`** (alias `ha`, `home assistant`) redémarre HA, sans confirmation : il vérifie d'abord sa configuration et **refuse** de redémarrer
   si elle est invalide (le bot rapporte l'erreur, HA continue de tourner). Le bot reste réactif, puis écrit « Home Assistant est de retour (N s) » ; sinon il prévient au bout de 7 minutes.
 - **`/restart pi`** demande confirmation (`/restart pi confirm`), enregistre le compteur de data, puis exécute `systemctl reboot`. Au redémarrage du listener, un message « Le Pi a redémarré » arrive
   (`reboot_requested.json`, ignoré par git). `shutdown.dry_run` simule aussi ce redémarrage. Pas de signal Healthchecks : le Pi revient bien avant la fin du délai de grâce.

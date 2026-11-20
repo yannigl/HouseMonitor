@@ -21,7 +21,7 @@ Commandes (depuis le chat configuré uniquement) :
   /stop monitor| /start monitor résumé du matin
   /shutdown                    éteint le Pi après confirmation (/shutdown confirm), alias : /stop pi
   /restart netatmo             recharge l'intégration Netatmo dans HA (sans redémarrer HA)
-  /restart homeassistant|pi    redémarre HA / le Pi, après confirmation (… confirm)
+  /restart homeassistant       redémarre HA (sans confirmation) ; /restart pi : le Pi, après confirmation (… confirm)
   /stop listener               passe en mode éco : 1 appel toutes les `slow_poll_hours` h
   /start listener              retour au long polling (réactif)
 """
@@ -135,7 +135,7 @@ COMMANDS = [
     ("pause", "Aspirateur : pause — /pause <nom>"),
     ("state", "État et attributs d'une entité : /state <mot> (comme Developer tools → States)"),
     ("git", "Mettre à jour le code du Pi : /git pull"),
-    ("restart", "Redémarrer : /restart netatmo (recharger l'intégration) · homeassistant · pi · modem (confirmation) · sans mot : le listener"),
+    ("restart", "Redémarrer : /restart netatmo (recharger l'intégration) · homeassistant · pi · modem (pi et modem : confirmation) · sans mot : le listener"),
     ("alerts", "Alertes du jour : entités surveillées, état, armement, dernière erreur (administrateurs)"),
     ("rearm", "Alertes : la prochaine alerte de chaque détecteur sera envoyée (Telegram + SMS)"),
     ("zigbee", "Santé du réseau Zigbee : liens (LQI, RSSI), coupures, voisins — /zigbee [heures] (administrateurs)"),
@@ -267,11 +267,10 @@ def shutdown_signal_text(st):
 
 
 MODEM_PENDING = {"t": None}  # demande de redémarrage du modem en attente (en mémoire, comme pour /shutdown)
-HA_PENDING = {"t": None}  # idem pour /restart homeassistant
 PI_PENDING = {"t": None}  # idem pour /restart pi
 REBOOT_MARK = HERE / "reboot_requested.json"  # écrit juste avant un /restart pi : le listener annonce son retour au démarrage
 RESTART_USAGE = ("Usage : /restart netatmo (recharge l'intégration) · /restart homeassistant · /restart pi · /restart modem\n"
-                 "/restart seul relance le listener du bot. Les redémarrages demandent une confirmation.")
+                 "/restart seul relance le listener du bot. Le Pi et le modem demandent une confirmation.")
 
 
 def can_reboot():
@@ -458,18 +457,8 @@ def handle(text, st, role="admin", chat_id=None):
         name, confirmed = "".join(a for a in args if a != "confirm"), "confirm" in args  # « home assistant » = « homeassistant »
         if name == "netatmo":
             return "🔄 Je recharge l'intégration Netatmo dans HA…", lambda tg, offset: netatmo_reload(tg, offset, chat_id)
-        if name in ("homeassistant", "ha", "hass"):
-            if not confirmed:
-                HA_PENDING["t"] = time.monotonic()
-                return ("⚠️ Redémarrer Home Assistant ?\n• HA est indisponible 1 à 3 minutes : automatisations, alertes caméra, capteurs Zigbee et Netatmo\n"
-                        "• le Pi et ce bot restent en marche ; un message arrive quand HA est de retour\n"
-                        "• HA vérifie d'abord sa configuration et refuse de redémarrer si elle est invalide\n\n"
-                        f"Confirmez dans les {CONFIRM_WINDOW} s : /restart homeassistant confirm")
-            t = HA_PENDING["t"]
-            HA_PENDING["t"] = None
-            if t is None or time.monotonic() - t > CONFIRM_WINDOW:
-                return "Aucune demande de redémarrage de HA en attente (ou expirée). Refaites /restart homeassistant."
-            return "🔄 Redémarrage de Home Assistant demandé, patientez…", lambda tg, offset: ha_restart(tg, offset, chat_id)
+        if name in ("homeassistant", "ha", "hass"):  # sans confirmation : HA revient seul, le bot reste en marche et prévient au retour
+            return "🔄 Redémarrage de Home Assistant demandé (1 à 3 minutes), un message arrive à son retour…", lambda tg, offset: ha_restart(tg, offset, chat_id)
         if name in ("pi", "raspberry", "raspberrypi", "reboot"):
             if not confirmed:
                 if not can_reboot():
