@@ -83,6 +83,7 @@
     "every_minutes": 5,
     "max_age_hours": 6,
     "settle_seconds": 180,
+    "boot_window_minutes": 60,
     "exclude": []
   },
   "hours": 24,

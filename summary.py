@@ -816,12 +816,13 @@ def floats(states):
 
 
 def consumed_kwh(states, unit):
-    """Énergie consommée sur la fenêtre (kWh) d'après un compteur cumulatif ; une baisse = remise à zéro du compteur."""
+    """Énergie consommée sur la fenêtre (kWh) d'après un compteur cumulatif. Une chute à moins de la moitié = remise à zéro du compteur (on repart de la nouvelle
+    valeur). Une petite baisse n'en est pas une : une prise qui perd le courant revient à sa dernière valeur sauvegardée (38,39 -> 38,36 kWh), rien n'est consommé."""
     f = UNIT_KWH.get(unit)
     v = floats(states)
     if f is None or not v:
         return None
-    return sum((b - a) if b >= a else b for a, b in zip(v, v[1:])) * f
+    return sum((b - a) if b >= a else (b if b < a * 0.5 else 0.0) for a, b in zip(v, v[1:])) * f
 
 
 def fmt_kwh(x):

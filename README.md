@@ -459,15 +459,20 @@ après un reboot l'heure peut être fausse jusqu'à la synchro réseau.
 - `403 Forbidden` du flux vidéo local : recharger l'intégration Netatmo.
 
 ### Prises remises en marche après une coupure (`switchrestore.py`, `/restore`)
-Après une coupure de courant, une prise Zigbee revient avec son réglage de démarrage, souvent « éteinte », même si elle était allumée. L'historique de HA le montre : une prise coupée puis revenue passe par **`on` → `unavailable` → `off`**,
-alors qu'une prise éteinte volontairement passe directement de `on` à `off`. Le listener contrôle toutes les 5 minutes les prises éteintes et **rallume celles qui étaient allumées juste avant une indisponibilité** :
-`↩️ Coupure détectée : prises remises en marche • Switch Abri : remise en marche (allumée avant la coupure de 19/11 14h45, revenue éteinte à 14h50)` (message dans votre chat privé).
-- Une prise éteinte à la main n'est **jamais** rallumée. Un « off » fugitif au démarrage de HA non plus : la prise doit être revenue éteinte depuis 3 minutes (`settle_seconds`).
-- Seules les prises revenues depuis moins de 6 h (`max_age_hours`) sont traitées automatiquement ; 3 essais au plus par prise, puis un message d'abandon (`❌ … HTTP 500 …`).
+Après une coupure de courant, une prise Zigbee revient avec son réglage de démarrage, souvent « éteinte », même si elle était allumée. Le listener contrôle toutes les 5 minutes les prises éteintes et **rallume celles qui étaient allumées juste avant**,
+d'après l'**historique de HA** (pas d'instantané : il serait écrasé par la coupure). Un passage de `on` à `off` est attribué à une coupure dans deux cas seulement :
+- **Redémarrage du Pi** : le `off` est enregistré dans l'heure qui suit le démarrage du Pi (`boot_window_minutes`). Une prise privée de courant reste « allumée » dans HA tant qu'il ne l'a pas relue (Zigbee ne la déclare indisponible qu'après ~2 h de silence) :
+  le redémarrage lui fait lire sa vraie position. Cas réel : puissance tombée de 249 à 0 W vers 14h12, Pi redémarré à 14h48, `off` enregistré à 14h50.
+- **Indisponibilité** : `on` → `unavailable` → `off` (coupure plus longue, que Zigbee a fini par constater).
+
+Une prise éteinte à la main passe de `on` à `off` sans l'un ni l'autre : elle n'est **jamais** rallumée. Message dans votre chat privé :
+`↩️ Coupure détectée : prises remises en marche • Switch Abri : remise en marche (allumée avant le redémarrage du Pi de 19/11 14h48, revenue éteinte à 14h50)`.
+- Le `off` doit dater d'au moins 3 minutes (`settle_seconds`) ; seules les prises revenues depuis moins de 6 h (`max_age_hours`) sont traitées automatiquement ; 3 essais au plus par prise, puis un message d'abandon.
 - Ne sont jamais touchées : les entités de `control.exclude` (prise du routeur, pompe d'arrosage…) et celles de `restore.exclude`, entity_id exacts ou préfixes. **Mettez-y tout ce qu'il serait dangereux de rallumer seul.** Domaines : ceux de `control.domains` (`switch` par défaut).
-- `/restore [heures]` (administrateurs) le fait tout de suite sur la période demandée (24 h par défaut ; `/restore 48` pour une coupure d'avant-hier) ; `/restore list` montre les candidates sans rien actionner. Sur le Pi : `python3 switchrestore.py [heures]` (liste seulement).
-- Limite : si vous éteignez une prise **à la main pendant** une coupure (elle est alors `unavailable`), elle ressemble à une prise coupée par la coupure et sera rallumée. Les autres entités d'un même appareil (verrou enfant, rétro-éclairage) sont remises comme avant, elles aussi.
-- Réglages : `"restore": {"enabled": true, "every_minutes": 5, "max_age_hours": 6, "settle_seconds": 180, "exclude": []}` ; `"enabled": false` coupe le contrôle automatique (`/restore` marche toujours). L'historique de HA ne remonte qu'à 10 jours.
+- `/restore [heures]` (administrateurs) le fait tout de suite sur la période demandée (24 h par défaut ; `/restore 48` pour avant-hier) ; `/restore list` montre les candidates sans rien actionner. Sur le Pi : `python3 switchrestore.py [heures]` (liste seulement).
+- **Limites** : une coupure sans redémarrage du Pi et plus courte que ~2 h n'est pas reconnue (HA garde « allumée » une prise qui est éteinte) ; une prise éteinte à la main dans l'heure qui suit un redémarrage, ou pendant une coupure, est rallumée ; seul le dernier démarrage du Pi est connu.
+  Les autres entités d'un même appareil (verrou enfant, rétro-éclairage) sont remises comme avant, elles aussi.
+- Réglages : `"restore": {"enabled": true, "every_minutes": 5, "max_age_hours": 6, "settle_seconds": 180, "boot_window_minutes": 60, "exclude": []}` ; `"enabled": false` coupe le contrôle automatique (`/restore` marche toujours).
 - Complément à régler **sur la prise** si son modèle le permet : l'état au retour du courant (« power on behavior » / « power outage memory » : mémoriser la dernière position), pour ne pas dépendre du Pi.
 
 ### Redémarrer HA, Netatmo ou le Pi (`/restart netatmo|homeassistant|pi`)
@@ -702,6 +707,8 @@ La ligne du routeur ne donne que le volume d'hier (le jour précédent complet) 
 `"stable_tolerance": {"dB": 2}` (dans `summary`, défaut) donne l'écart max-min toléré par unité ; ajoutez par exemple `"%": 1` ou `"hPa": 1` pour d'autres grandeurs.
 Un redémarrage du Pi dans les dernières 24 h ajoute « ⏻ Pi redémarré à hh:mm (il y a N h) » au résumé (d'après /proc/uptime : seul un redémarrage du Pi compte, pas celui du listener).
 Tolérances « stable » par défaut : 2 dB, 2 % (humidité…), 1 hPa, 200 ppm (CO2). Une tolérance de `stable_tolerance` s'ajoute à ces défauts, elle ne les remplace pas.
+
+**Énergie d'une prise** : `+x kWh/j` est la hausse du compteur sur la fenêtre. Une chute du compteur à moins de la moitié est une remise à zéro (on repart de la nouvelle valeur) ; une petite baisse, comme 38,39 → 38,36 kWh quand une prise perd le courant et revient à sa dernière valeur sauvegardée, ne compte pour rien (elle ajoutait auparavant tout le compteur : « +39,55 kWh/j » au lieu de 0,64).
 
 **CO2 lissé** : un capteur de CO2 Netatmo peut sauter de ±100 ppm d'un relevé à l'autre sans que l'air change (le salon de l'exemple : écart-type 103 ppm, contre 13 ppm dans la chambre, même modèle). Les capteurs dont le nom contient
 « carbon dioxide » sont donc remplacés par leur **moyenne glissante sur 120 minutes** (chaque relevé = la moyenne des relevés des 2 h précédentes) : dans le résumé du matin (« Living Room Carbon dioxide (moy. 120 min) : 508ppm (stable) »,
