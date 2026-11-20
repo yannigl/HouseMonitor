@@ -78,6 +78,10 @@
     "poll_seconds": 20,
     "watch": []
   },
+  "export": {
+    "max_entities": 40,
+    "max_mb": 8
+  },
   "restore": {
     "enabled": true,
     "every_minutes": 5,

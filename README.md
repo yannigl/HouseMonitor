@@ -673,7 +673,7 @@ Sans le compteur, la ligne « Pi au total » indique « non mesuré » ; le rest
 **Depuis Telegram** (administrateurs) : `/export [durée] <mot> [mot …]` envoie en pièce jointe un CSV de **tous les relevés** de HA (heure locale, entité, nom, valeur, unité) des capteurs dont le nom,
 l'`entity_id` ou l'appareil contient **tous** les mots, suivi d'un résumé par capteur (nombre de relevés, intervalle médian, min, max, valeurs). Durée : `48` ou `48h` (heures), `2j` (jours), 24 h par défaut ;
 HA ne garde que 10 jours de relevés détaillés. Mots français courants acceptés (`dioxyde`, `pluie`, `vent`…). Ex. `/export dioxyde`, `/export 48 living room carbon`, `/export 2j wind`.
-Au plus 12 capteurs et 8 Mo par export (le Pi est sur une 4G à data comptée) : au-delà, le bot demande de préciser avec un mot de plus.
+Au plus 40 capteurs et 8 Mo par export (le Pi est sur une 4G à data comptée ; `"export": {"max_entities": 40, "max_mb": 8}` pour changer) : au-delà, le bot demande de préciser avec un mot de plus. `/export 24 switch` donne par exemple tous les capteurs des prises (27 chez vous).
 
 **Sur le Pi** : `python3 exportdata.py [heures] [mot ...]` écrit `export_<heures>h.csv` pour les capteurs dont le nom contient **un des** mots
 (défaut : `download upload`, sur 24 h) et affiche le rythme des relevés. Ex. `python3 exportdata.py 48 wind`.

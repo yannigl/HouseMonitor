@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 
 import summary
 
-MAX_ENTITIES = 12  # par Telegram : au-delà, on demande de préciser (le Pi est sur une 4G à data comptée)
-MAX_BYTES = 8_000_000
+_X = summary.CFG.get("export", {})  # config.json -> "export": {"max_entities": 40, "max_mb": 8}
+MAX_ENTITIES = _X.get("max_entities", 40)  # par Telegram : au-delà, on demande de préciser (le Pi est sur une 4G à data comptée)
+MAX_BYTES = int(_X.get("max_mb", 8) * 1_000_000)
 KEEP_DAYS_NOTE = 9.5 * 24  # HA ne garde l'historique détaillé que 10 jours par défaut (recorder: purge_keep_days)
 
 
