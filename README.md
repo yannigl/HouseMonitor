@@ -78,6 +78,7 @@ les entités actuellement **indisponibles**. Un pied de page indique combien son
 sur l'état actuel : un capteur tombé en panne en cours de journée y figure encore avec ses mesures.
 | `/stop ping` / `/start ping` | Coupe / relance le heartbeat Healthchecks (⚠️ couper = alerte après la grâce) |
 | `/stop monitor` / `/start monitor` | Coupe / relance le résumé du matin (le cron tourne, mais n'envoie rien) |
+| `/restore [heures]` · `/restore list` | Rallume les prises **allumées avant une coupure** et revenues éteintes (24 h par défaut) ; `list` montre lesquelles sans rien actionner (voir *Prises remises en marche après une coupure*) |
 | `/restart netatmo` | Recharge l'intégration **Netatmo** dans HA (comme « Recharger » dans Settings → Devices & services) : sans confirmation, HA ne redémarre pas |
 | `/restart homeassistant` | Redémarre **HA**, sans confirmation ; un message arrive à son retour (voir *Redémarrer HA, Netatmo ou le Pi*) |
 | `/restart pi` | Redémarre le **Pi**, après confirmation (`/restart pi confirm` dans les 60 s) ; un message arrive à son retour |
@@ -456,6 +457,18 @@ après un reboot l'heure peut être fausse jusqu'à la synchro réseau.
   joindre HA. Il faut un abonnement Home Assistant Cloud actif (Settings → Home Assistant Cloud) ou HA exposé en HTTPS sur le
   port 443. Sans cela, les détections ne sont visibles que dans l'appli Netatmo.
 - `403 Forbidden` du flux vidéo local : recharger l'intégration Netatmo.
+
+### Prises remises en marche après une coupure (`switchrestore.py`, `/restore`)
+Après une coupure de courant, une prise Zigbee revient avec son réglage de démarrage, souvent « éteinte », même si elle était allumée. L'historique de HA le montre : une prise coupée puis revenue passe par **`on` → `unavailable` → `off`**,
+alors qu'une prise éteinte volontairement passe directement de `on` à `off`. Le listener contrôle toutes les 5 minutes les prises éteintes et **rallume celles qui étaient allumées juste avant une indisponibilité** :
+`↩️ Coupure détectée : prises remises en marche • Switch Abri : remise en marche (allumée avant la coupure de 19/11 14h45, revenue éteinte à 14h50)` (message dans votre chat privé).
+- Une prise éteinte à la main n'est **jamais** rallumée. Un « off » fugitif au démarrage de HA non plus : la prise doit être revenue éteinte depuis 3 minutes (`settle_seconds`).
+- Seules les prises revenues depuis moins de 6 h (`max_age_hours`) sont traitées automatiquement ; 3 essais au plus par prise, puis un message d'abandon (`❌ … HTTP 500 …`).
+- Ne sont jamais touchées : les entités de `control.exclude` (prise du routeur, pompe d'arrosage…) et celles de `restore.exclude`, entity_id exacts ou préfixes. **Mettez-y tout ce qu'il serait dangereux de rallumer seul.** Domaines : ceux de `control.domains` (`switch` par défaut).
+- `/restore [heures]` (administrateurs) le fait tout de suite sur la période demandée (24 h par défaut ; `/restore 48` pour une coupure d'avant-hier) ; `/restore list` montre les candidates sans rien actionner. Sur le Pi : `python3 switchrestore.py [heures]` (liste seulement).
+- Limite : si vous éteignez une prise **à la main pendant** une coupure (elle est alors `unavailable`), elle ressemble à une prise coupée par la coupure et sera rallumée. Les autres entités d'un même appareil (verrou enfant, rétro-éclairage) sont remises comme avant, elles aussi.
+- Réglages : `"restore": {"enabled": true, "every_minutes": 5, "max_age_hours": 6, "settle_seconds": 180, "exclude": []}` ; `"enabled": false` coupe le contrôle automatique (`/restore` marche toujours). L'historique de HA ne remonte qu'à 10 jours.
+- Complément à régler **sur la prise** si son modèle le permet : l'état au retour du courant (« power on behavior » / « power outage memory » : mémoriser la dernière position), pour ne pas dépendre du Pi.
 
 ### Redémarrer HA, Netatmo ou le Pi (`/restart netatmo|homeassistant|pi`)
 Administrateurs seulement (jamais les membres d'un groupe).

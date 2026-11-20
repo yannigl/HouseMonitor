@@ -78,6 +78,13 @@
     "poll_seconds": 20,
     "watch": []
   },
+  "restore": {
+    "enabled": true,
+    "every_minutes": 5,
+    "max_age_hours": 6,
+    "settle_seconds": 180,
+    "exclude": []
+  },
   "hours": 24,
   "hide_unavailable": true,
   "domains": ["sensor", "binary_sensor", "switch", "light", "input_boolean"],

@@ -22,3 +22,5 @@ pi_counter.csv
 monitored_seen.json
 monitored_seen.tmp
 reboot_requested.json
+restore_state.json
+restore_state.tmp

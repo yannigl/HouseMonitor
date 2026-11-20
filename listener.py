@@ -20,6 +20,7 @@ Commandes (depuis le chat configuré uniquement) :
   /stop ping   | /start ping   heartbeat Healthchecks
   /stop monitor| /start monitor résumé du matin
   /shutdown                    éteint le Pi après confirmation (/shutdown confirm), alias : /stop pi
+  /restore [heures] | list     remet en marche les prises allumées avant une coupure et revenues éteintes (list : sans rien actionner)
   /restart listener            relance le bot (relit config.json et le code)
   /restart netatmo             recharge l'intégration Netatmo dans HA (sans redémarrer HA)
   /restart homeassistant       redémarre HA (sans confirmation) ; /restart pi : le Pi, après confirmation (… confirm)
@@ -50,6 +51,7 @@ import heating
 import modemwatch
 import routercount
 import summary
+import switchrestore
 import vacuum
 import zigbee
 from common import (CFG, HERE, SERVICES, count, data_block, data_compact, heartbeat, id_list, load_state, log_net, log_pi,
@@ -129,6 +131,7 @@ COMMANDS = [
     ("data", "Data 4G : script et Pi — /data reset : remise à zéro"),
     ("list", "Appareils HA regroupés — /list <mot> : détail, /list all : toutes les entités"),
     ("update", "Le résumé du matin, maintenant — /update all : tout, /update <mot> : ce qui contient le mot"),
+    ("restore", "Rallumer les prises qui étaient allumées avant une coupure : /restore [heures] · /restore list (administrateurs)"),
     ("on", "Allumer un interrupteur : /on <nom de l'appareil>"),
     ("off", "Éteindre un interrupteur : /off <nom de l'appareil>"),
     ("launch", "Aspirateur : lancer l'aspiration standard — /launch <nom>"),
@@ -581,6 +584,10 @@ def handle(text, st, role="admin", chat_id=None):
                     print(f"/export KO : {type(e).__name__}: {e}", file=sys.stderr, flush=True)
                     tg.reply(f"❌ Export impossible : {type(e).__name__}: {e}", chat_id=target)
             return "📄 Je prépare l'export…", export_after
+        if cmd == "/restore":
+            listing = args[:1] == ["list"]
+            nums = [a for a in args if a.replace(".", "", 1).isdigit()]
+            return switchrestore.report(float(nums[0]) if nums else 24.0, act=not listing)
         if cmd == "/stale":
             try:
                 hours = float(parts[1]) if parts[1:2] else 24.0
@@ -653,6 +660,7 @@ def loop():
           flush=True)
     announce_reboot()  # « Le Pi a redémarré » après un /restart pi
     arm.start_timers()  # retour automatique des /arm et /disarm temporaires
+    switchrestore.start()  # thread : prises revenues éteintes après une coupure -> remises en marche
     modemwatch.start()  # thread : coupure d'Internet -> redémarrage automatique du modem (plafonné)
     routercount.start()  # thread : compteur de trafic du routeur 4G, un relevé toutes les 30 min
     smsfwd.start()  # thread : SMS reçus par le routeur -> Telegram, indépendant de la page smsweb
