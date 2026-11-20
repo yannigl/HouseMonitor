@@ -19,3 +19,5 @@ export_*.csv
 router_probe.json
 router_counter.csv
 pi_counter.csv
+monitored_seen.json
+monitored_seen.tmp

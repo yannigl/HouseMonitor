@@ -22,7 +22,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from common import CFG, count, cycle_info, data_block, fmt_bytes, heartbeat, id_list, load_state, log_net, norm
+from common import CFG, HERE, count, cycle_info, data_block, fmt_bytes, heartbeat, id_list, load_state, log_net, norm
 
 HA = CFG.get("ha_url", "http://127.0.0.1:8123")
 AUTH = {"Authorization": f"Bearer {CFG['ha_token']}"}
@@ -176,14 +176,81 @@ def silent_devices(sts, dmap, hours=None):
     return sorted(out, reverse=True)
 
 
-def silent_text(rows):
-    if not rows:
+SEEN_FILE = HERE / "monitored_seen.json"  # {entity_id: {"n": nom, "t": dernière fois vue en état de marche}} : caméras et entités armables
+MONITOR_IGNORE = [norm(x) for x in _SUM.get("monitored_ignore", [])]  # entity_id (ou texte) de caméras à ne jamais signaler
+
+
+def configured_armed():
+    """Entités listées une par une dans la config « arm » (groupes et surnoms) : attendues même si elles ont disparu de HA."""
+    try:
+        import arm  # import tardif : arm importe summary
+        ids = set()
+        for g in arm.groups().values():
+            ids.update(e for e in g.get("entities", []) if isinstance(e, str))
+        for _, ents in arm.nicknames().values():
+            ids.update(ents)
+        return ids
+    except Exception as e:
+        print(f"entités armables de la config illisibles : {type(e).__name__}: {e}", file=sys.stderr)
+        return set()
+
+
+def monitored_missing(cur, armed, hours=None):
+    """Caméras (camera.*) et entités armables qu'on attend mais qui ne sont plus utilisables : [(nom, raison, dernière fois vue)].
+    Le résumé écarte une entité absente de HA ou « fantôme » (intégration non chargée) sans un mot, et « Sans nouvelles » ne regarde que les capteurs
+    de mesure : une caméra tombée n'y figurait donc jamais. On retient dans monitored_seen.json celles qui ont déjà marché ; une indisponible
+    n'est signalée qu'après `hours` h (stale_hours), les micro-coupures sont normales."""
+    hours = STALE_HOURS if hours is None else hours
+    if not hours:
+        return []
+    now = datetime.now().astimezone()
+    try:
+        seen = json.loads(SEEN_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        seen = {}
+    seen = seen if isinstance(seen, dict) else {}
+    watched = lambda e: (e.split(".")[0] == "camera" or e in armed) and not any(e.startswith(p) for p in EXCLUDE)
+    working = set()
+    for e, st in cur.items():
+        if watched(e) and not is_ghost(st) and st["state"] not in ("unavailable", "unknown"):
+            seen[e] = {"n": st.get("attributes", {}).get("friendly_name", e), "t": now.isoformat(timespec="seconds")}
+            working.add(e)
+    rows = []
+    for e in sorted(set(seen) | configured_armed() | {e for e in cur if watched(e)}):
+        if e in working or any(x in norm(e) for x in MONITOR_IGNORE):
+            continue
+        st = cur.get(e)
+        name = (st or {}).get("attributes", {}).get("friendly_name") or seen.get(e, {}).get("n") or e
+        if st is None:
+            reason = "introuvable dans HA"
+        elif is_ghost(st):
+            reason = "intégration non chargée dans HA"
+        else:
+            since = datetime.fromisoformat(st["last_changed"]).astimezone()
+            age = (now - since).total_seconds() / 3600
+            if age < hours:
+                continue
+            reason = f"indisponible depuis {since:%d/%m %Hh%M} ({fmt_age(age)})"
+        last = seen.get(e, {}).get("t")
+        rows.append((name, reason, datetime.fromisoformat(last).astimezone() if last else None))
+    try:  # écriture atomique : le listener et le cron peuvent tourner en même temps
+        tmp = SEEN_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(seen, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, SEEN_FILE)
+    except OSError as e:
+        print(f"monitored_seen.json non écrit : {e}", file=sys.stderr)
+    return rows
+
+
+def silent_text(rows, missing=()):
+    if not rows and not missing:
         return ""
     def line(age, name, t):
         if age >= 24:  # silence long : juste le nom (sans le préfixe « Netatmo Weather station - ») et la durée
             return f"• {name.rsplit(' - ', 1)[-1]} - {fmt_age(age)}"
         return f"• {name} : aucune donnée depuis {t:%d/%m %Hh%M} ({fmt_age(age)})"
     lines = [line(age, name, t) for age, name, t, _ in rows]
+    lines += [f"• {name} : {reason}" + (f", vue le {t:%d/%m %Hh%M}" if t else "") for name, reason, t in missing]
     return "\n\n⚠️ Sans nouvelles\n" + "\n".join(lines)
 
 
@@ -1503,6 +1570,11 @@ def build_report(with_chart=True):
     cur = {s["entity_id"]: s for s in sts}
     ents = discover(sts)
     armed = armed_entities(cur)
+    try:  # caméras et entités armables qui ont disparu de HA ou ne sont plus chargées : signalées en tête
+        missing_rows = monitored_missing(cur, armed)
+    except Exception as e:
+        print(f"caméras manquantes illisibles : {type(e).__name__}: {e}", file=sys.stderr)
+        missing_rows = []
     for eid in armed:  # caméras et autres entités armables : résumées même si leur domaine n'est pas dans « domains »
         if eid in cur and eid not in ents and not is_ghost(cur[eid]):
             ents[eid] = (cur[eid].get("attributes", {}).get("friendly_name", eid), "")
@@ -1696,7 +1768,7 @@ def build_report(with_chart=True):
         put(sections["🔌 Switches / lumières"], "• " + l)
     text = f"☀️ Résumé du {datetime.now():%d/%m} (dernières {HOURS} h)"
     try:  # appareils de mesure silencieux : en tête, pour qu'on ne les prenne pas pour des valeurs « stables »
-        text += silent_text(silent_rows)
+        text += silent_text(silent_rows, missing_rows)
     except Exception as e:
         print(f"avertissement « sans nouvelles » impossible : {type(e).__name__}: {e}", file=sys.stderr)
     for key in ("📈 Capteurs", "🚨 Alertes", "🔌 Switches / lumières", DET):  # ordre fixe

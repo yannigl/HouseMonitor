@@ -148,6 +148,11 @@ En tête du résumé, `⚠️ Sans nouvelles` liste tout appareil de mesure dont
 nouvelles depuis 6 h : `• Weather Station : aucune donnée depuis 27/10 12h03 (2 j)`. Sans cela, un capteur figé ressemble à une valeur « stable ».
 Un appareil qui n'émet que sur événement (porte, mouvement, bouton) n'est jamais signalé. Réglages de `summary` : `stale_hours` (6 ; `0` désactive),
 `stale_ignore` (textes dans le nom de l'appareil à ne pas signaler). `/stale` donne la liste détaillée de toutes les entités silencieuses.
+**Caméras et détecteurs armables** : le même bloc signale aussi une caméra (`camera.*`) ou une entité de la config `arm` qui n'est plus utilisable, ce que le résumé écartait auparavant sans un mot :
+`• Netatmo Salon : introuvable dans HA, vue le 18/11 07h31` (l'entité a disparu de HA : renommée, supprimée), `… : intégration non chargée dans HA` (l'intégration, par exemple Netatmo, ne démarre plus : jeton expiré, panne du cloud),
+`… : indisponible depuis 19/11 21h06 (10 h)` (au bout de `stale_hours` h seulement : les micro-coupures sont normales). Le Pi retient dans `monitored_seen.json` (ignoré par git) les caméras déjà vues en état de marche, d'où le « vue le » ;
+une caméra qui avait déjà disparu avant la mise à jour n'est connue qu'après sa première apparition, sauf si elle figure en toutes lettres dans un groupe `arm` (`"entities": [...]`).
+`"summary": {"monitored_ignore": ["camera.netatmo_jardin"]}` retire une caméra volontairement supprimée de cette liste.
 
 ### Résumé du matin : détecteurs, aspirateur, lignes masquées
 - **🛡 Détecteurs / caméras** : les entités de la config `arm` (groupes et surnoms), les caméras et les détecteurs de mouvement
